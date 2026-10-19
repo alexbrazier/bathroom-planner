@@ -80,7 +80,8 @@ function sync() {
         <label class="fb-num">H <input type="number" data-f="height" value="${op.height}"></label>
         ${door ? `<button data-a="hinge" title="Swap hinge side">⇄ Hinge ${op.hinge === 'right' ? 'R' : 'L'}</button>
                  <button data-a="swing" title="Open into or out of the room">${op.swing === 'out' ? '↑ Opens out' : '↓ Opens in'}</button>`
-               : `<label class="fb-num">Sill <input type="number" data-f="sill" value="${op.sill}"></label>`}
+               : `<label class="fb-num">Sill <input type="number" data-f="sill" value="${op.sill}"></label>
+                  <button data-a="glass" title="Clear or frosted (obscure) glass">${op.glass === 'frosted' ? '▒ Frosted' : '◻ Clear'}</button>`}
         <button data-a="del" class="danger" title="Delete">Delete</button>`;
       // look the opening up when used: undo/redo replace the design, so a captured object can be stale
       const id = op.id;
@@ -99,6 +100,7 @@ function sync() {
       const b = (a) => ob.querySelector(`[data-a=${a}]`);
       if (b('hinge')) b('hinge').onclick = () => edit((op) => { op.hinge = op.hinge === 'right' ? 'left' : 'right'; });
       if (b('swing')) b('swing').onclick = () => edit((op) => { op.swing = op.swing === 'out' ? 'in' : 'out'; });
+      if (b('glass')) b('glass').onclick = () => edit((op) => { op.glass = op.glass === 'frosted' ? 'clear' : 'frosted'; });
       b('del').onclick = () => mutate(() => { store.d.openings = store.d.openings.filter((o) => o.id !== id); store.sel = null; });
     }
     const t = op.offset + op.width / 2;

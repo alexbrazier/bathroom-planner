@@ -92,3 +92,10 @@ For Access: Zero Trust → Access → Applications → Add → Self-hosted → d
   and downloads thumbnails into `data/img/<prefix>/`.
 
 Prices are snapshots and will drift; dimensions are what matter for planning.
+
+## Window views
+
+`data/views/*.jpg` are 360° photos from [Poly Haven](https://polyhaven.com/hdris) (CC0), downscaled to 4096×2048:
+garden_nook, stuttgart_suburbs, evening_meadow and zawiszy_czarnego. Each room picks one under **Room → Outside the
+windows** (with floor level and a turn angle); it's drawn on a sphere around the room and only shown when the camera
+is inside the room (eye level / VR), so you see it through clear windows with real perspective.

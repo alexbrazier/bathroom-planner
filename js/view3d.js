@@ -128,12 +128,14 @@ export function init3d(container, { onDropModel }) {
   });
 
   renderer.setAnimationLoop(() => {
-    if (renderer.xr.isPresenting) { vrTick(); showReflections(true); renderer.render(scene, camera); return; }
+    if (renderer.xr.isPresenting) { vrTick(); showReflections(true); showOutside(true); renderer.render(scene, camera); return; }
     if (!container.offsetParent) return;
     if (controls.update() || v3.dirty) {
       v3.dirty = false;
       const c = camera.position, room = store.d.room;
-      showReflections(c.y > 0 && c.y * 1000 < ceilingAt(room, c.x * 1000, c.z * 1000) && pointInPoly({ x: c.x * 1000, y: c.z * 1000 }, room.pts));
+      const inside = c.y > 0 && c.y * 1000 < ceilingAt(room, c.x * 1000, c.z * 1000) && pointInPoly({ x: c.x * 1000, y: c.z * 1000 }, room.pts);
+      showReflections(inside);
+      showOutside(inside);
       renderer.render(scene, camera);
     }
   });
@@ -176,6 +178,58 @@ export function eyeLevel() {
   v3.controls.target.set(s.lookX, 1.2, s.lookZ);
   v3.camera.fov = 70; v3.camera.updateProjectionMatrix();
   v3.controls.update(); updateCutaway(); requestRender();
+}
+
+// ------------------------------------------------------------------ view outside the windows
+// A 360° photo (CC0, Poly Haven) on a big sphere around the room, seen through the windows with real perspective.
+// Only shown when the camera is inside the room (from an orbit view it would wall everything in).
+export const VIEWS = [
+  { id: 'garden_nook', label: 'Garden' },
+  { id: 'stuttgart_suburbs', label: 'Suburban street' },
+  { id: 'evening_meadow', label: 'Countryside' },
+  { id: 'zawiszy_czarnego', label: 'Town street' },
+  { id: 'none', label: 'None (plain sky)' },
+];
+const viewTex = new Map();
+let outside = null, outsideKey = '';
+function frostedGlass() {
+  const k = '__frostWin';
+  if (!viewTex.has(k)) viewTex.set(k, new THREE.MeshStandardMaterial({ color: '#eef3f6', emissive: '#d3dee6', emissiveIntensity: 0.45, roughness: 0.95, transparent: true, opacity: 0.93, side: THREE.DoubleSide }));
+  return viewTex.get(k);
+}
+export function outsideOf(room) {
+  const o = room.outside || {};
+  return { view: o.view || 'garden_nook', level: o.level || 0, turn: o.turn || 0 };
+}
+function updateOutside() {
+  const room = store.d.room, o = outsideOf(room);
+  const b = polyBounds(room.pts);
+  const key = JSON.stringify([o, b.cx, b.cy]);
+  if (key === outsideKey) return;
+  outsideKey = key;
+  if (!outside) {
+    outside = new THREE.Mesh(new THREE.SphereGeometry(40, 64, 32), new THREE.MeshBasicMaterial({ side: THREE.BackSide, depthWrite: false, toneMapped: false }));
+    outside.renderOrder = -1; outside.visible = false;
+    v3.scene.add(outside);
+  }
+  outside.position.set(b.cx * MM, 1.6 - o.level * 2.8, b.cy * MM);  // panorama eye ~1.6 m above its ground
+  outside.rotation.y = -o.turn * Math.PI / 180;
+  if (o.view === 'none') { outside.material.map = null; outside.material.color.set('#cfe0ee'); outside.material.needsUpdate = true; return; }
+  outside.material.color.set('#ffffff');
+  let tex = viewTex.get(o.view);
+  if (!tex) {
+    tex = new THREE.TextureLoader().load(`data/views/${o.view}.jpg`, () => requestRender());
+    tex.colorSpace = THREE.SRGBColorSpace; tex.mapping = THREE.EquirectangularReflectionMapping;
+    tex.anisotropy = 4;
+    viewTex.set(o.view, tex);
+  }
+  // equirect on the inside of a sphere: flip horizontally so it isn't mirrored
+  tex.wrapS = THREE.RepeatWrapping; tex.repeat.x = -1;
+  outside.material.map = tex; outside.material.needsUpdate = true;
+}
+function showOutside(on) {
+  const hasWindow = store.d.openings.some((op) => op.type === 'window' && op.glass !== 'frosted');
+  if (outside) outside.visible = on && hasWindow;
 }
 
 // ------------------------------------------------------------------ room
@@ -318,6 +372,7 @@ export function rebuildRoom() {
   Object.assign(v3.sun.shadow.camera, { left: -ext, right: ext, top: ext, bottom: -ext, near: 0.5, far: 15 });
   v3.sun.shadow.camera.updateProjectionMatrix();
   v3.ceilingLight.position.set(b.cx * MM, ceilingAt(room, b.cx, b.cy) * MM - 0.1, b.cy * MM);
+  updateOutside();
   updateCutaway();
   requestRender();
 }
@@ -360,9 +415,28 @@ function addOpening(g, w, o, room) {
   mk(W, ft, T + 0.01, 0, sill + H - ft / 2, 0, frameM);
   if (o.type === 'window') {
     mk(W, ft, T + 0.05, 0, sill + ft / 2, 0.02, frameM);
-    const gl = new THREE.Mesh(new THREE.PlaneGeometry(W - 2 * ft, H - 2 * ft), MATS.glass);
-    gl.position.set(0, sill + H / 2, 0); fr.add(gl);
-    mk(0.03, H - 2 * ft, 0.05, 0, sill + H / 2, 0, frameM);
+    // internal window board, 35 mm proud of the wall face
+    const bd = T / 2 + 0.035;
+    mk(W + 0.08, 0.022, bd, 0, sill - 0.011, bd / 2, mat('#f7f7f5', { roughness: 0.45 }));
+    // casement sashes (2 if wide enough) with clear or frosted (obscure) glass and a lever handle each
+    const panes = o.panes || (W > 0.75 ? 2 : 1);
+    const iw = W - 2 * ft, ih = H - 2 * ft, pw = iw / panes, sf = 0.045, y0 = sill + ft;
+    const glassM = o.glass === 'frosted' ? frostedGlass() : MATS.glass;
+    for (let i = 0; i < panes; i++) {
+      const cx = -iw / 2 + pw * (i + 0.5);
+      mk(pw - 0.004, sf, 0.06, cx, y0 + sf / 2, 0, frameM);
+      mk(pw - 0.004, sf, 0.06, cx, y0 + ih - sf / 2, 0, frameM);
+      mk(sf, ih - 2 * sf, 0.06, cx - pw / 2 + sf / 2 + 0.002, y0 + ih / 2, 0, frameM);
+      mk(sf, ih - 2 * sf, 0.06, cx + pw / 2 - sf / 2 - 0.002, y0 + ih / 2, 0, frameM);
+      const gl = new THREE.Mesh(new THREE.PlaneGeometry(pw - 2 * sf, ih - 2 * sf), glassM);
+      gl.position.set(cx, y0 + ih / 2, 0); fr.add(gl);
+      // handle on the closing edge (towards the middle for a pair), room side
+      const hx = panes === 1 ? cx + pw / 2 - sf / 2 : i < panes / 2 ? cx + pw / 2 - sf / 2 : cx - pw / 2 + sf / 2;
+      const hy = y0 + Math.min(ih / 2, 0.55);
+      mk(0.022, 0.05, 0.012, hx, hy, 0.036, MATS.chrome);
+      mk(0.014, 0.012, 0.03, hx, hy - 0.018, 0.05, MATS.chrome);
+      mk(0.014, 0.1, 0.012, hx, hy - 0.07, 0.062, MATS.chrome);
+    }
   } else {
     const leafW = W - 2 * ft, leafH = H - ft;
     const leaf = new THREE.Group();

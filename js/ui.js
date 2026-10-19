@@ -5,6 +5,7 @@ import { wallsOf, polyBounds, normAngle, snap, pointInPoly, ceilingAt } from './
 import { addModelAt, clearances, splitWall, removeVertex, plan, drawActions } from './plan2d.js';
 import { placeItem, ridersOf, applyRiders, findSupport } from './place.js';
 import { braceInfo, flushInfo, bathInfo } from './models3d.js';
+import { VIEWS, outsideOf } from './view3d.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -509,6 +510,9 @@ function openingPanel(el, op) {
     ${num('Width', 'width', op.width)}
     ${num('Height', 'height', op.height)}
     ${op.type === 'window' ? num('Sill height', 'sill', op.sill) : ''}
+    ${op.type === 'window' ? `
+      <div class="row"><label>Glass</label><select data-k="glass"><option value="clear" ${op.glass !== 'frosted' ? 'selected' : ''}>Clear</option><option value="frosted" ${op.glass === 'frosted' ? 'selected' : ''}>Frosted (obscure)</option></select></div>
+      <div class="row"><label>Opening sashes</label><select data-k="panes">${[[0, 'Auto'], [1, '1'], [2, '2'], [3, '3']].map(([v, l]) => `<option value="${v}" ${(op.panes || 0) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>` : ''}
     ${op.type === 'door' ? `
       <div class="row"><label>Hinge side</label><select data-k="hinge"><option value="left" ${op.hinge !== 'right' ? 'selected' : ''}>Left</option><option value="right" ${op.hinge === 'right' ? 'selected' : ''}>Right</option></select></div>
       <div class="row"><label>Opens</label><select data-k="swing"><option value="in" ${op.swing !== 'out' ? 'selected' : ''}>Into room</option><option value="out" ${op.swing === 'out' ? 'selected' : ''}>Outwards</option></select></div>` : ''}
@@ -520,6 +524,8 @@ function openingPanel(el, op) {
     width: (v) => mutate(() => { op.width = Math.max(200, Math.min(w.len, +v)); clampOff(); }, 'room'),
     height: (v) => mutate(() => { op.height = Math.max(200, +v); }, 'room'),
     sill: (v) => mutate(() => { op.sill = Math.max(0, +v); }, 'room'),
+    glass: (v) => mutate(() => { op.glass = v; }, 'room'),
+    panes: (v) => mutate(() => { if (+v) op.panes = +v; else delete op.panes; }, 'room'),
     hinge: (v) => mutate(() => { op.hinge = v; }, 'room'),
     swing: (v) => mutate(() => { op.swing = v; }, 'room'),
     del: () => mutate(() => { store.d.openings = store.d.openings.filter((o) => o !== op); store.sel = null; }, 'room'),
@@ -566,6 +572,15 @@ function roomPanel(el) {
     <div class="note">The ceiling is ${sl.low ?? 1200} mm high at wall ${sl.wall + 1} and rises to ${r.height} mm, ${sl.run ?? 1500} mm into the room. In 2D the dashed lines show where full height starts and where headroom reaches 2000 mm. Select a wall in Edit room to see its number.</div>`;
     })() : ''}
 
+    <h4>Outside the windows</h4>
+    ${(() => { const o = outsideOf(r); return `<div class="grid2">
+      <div class="fld"><span>View</span><select data-k="outView">${VIEWS.map((v) => `<option value="${v.id}" ${o.view === v.id ? 'selected' : ''}>${v.label}</option>`).join('')}</select></div>
+      <div class="fld"><span>Floor</span><select data-k="outLevel">${[[0, 'Ground floor'], [1, 'First floor'], [2, 'Second floor']].map(([v, l]) => `<option value="${v}" ${o.level === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <div class="fld"><span>Turn view (°)</span><input type="number" data-k="outTurn" value="${o.turn}" step="15"></div>
+    </div>
+    ${o.view !== 'none' ? `<img class="view-thumb" src="data/views/${o.view}-thumb.jpg" alt="">` : ''}
+    <div class="note">A 360° photo seen through clear windows (frosted ones stay private). Shown from inside the room — try <b>Eye level</b> in 3D, or VR. Photos: Poly Haven, CC0.</div>`; })()}
+
     <h4>Finishes</h4>
     <div class="row"><label>Wall paint</label><input type="color" data-k="wallColor" value="${r.wallColor}"></div>
     <div class="row"><label>Wall tiles</label><input type="checkbox" data-k="wtOn" ${r.wallTile.enabled ? 'checked' : ''}></div>
@@ -597,6 +612,9 @@ function roomPanel(el) {
     drawRoom: () => document.getElementById('toolDraw')?.click(),
     height: (v) => R(() => { r.height = Math.max(1500, +v); }),
     thick: (v) => R(() => { r.thickness = Math.max(20, +v); }),
+    outView: (v) => R(() => { r.outside = { ...outsideOf(r), view: v }; }),
+    outLevel: (v) => R(() => { r.outside = { ...outsideOf(r), level: +v }; }),
+    outTurn: (v) => R(() => { r.outside = { ...outsideOf(r), turn: ((+v % 360) + 360) % 360 }; }),
     slOn: (v) => R(() => {
       if (!r.slope) {
         // default: low side on the longest wall that has no door
