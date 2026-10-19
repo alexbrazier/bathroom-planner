@@ -168,6 +168,8 @@ export async function loadCatalog() {
   for (const m of GENERIC) { m.brand = m.brand || (m.mtm ? 'Dansani' : 'Generic'); m.range = m.range || (m.mtm ? 'Luna' : ''); }
   MODELS = [...GENERIC.filter((g) => g.mtm), ...data, ...vb, ...hg, MERLYN, VANQUISH, ...GENERIC.filter((g) => !g.mtm)];
   for (const m of MODELS) if (m.kind === 'showerhead' && !m.generic) normaliseShowerHead(m);
+  // Logis concealed basin mixers: listing gives overall height and no width; use the wall-plate size
+  for (const m of MODELS) if (m.kind === 'walltap' && /logis/i.test(m.name)) for (const s of m.sizes) { s.w = /fine/i.test(m.name) ? 220 : 200; s.h = 80; }
   for (const m of MODELS) {
     m.custom = m.custom || ['vanity', 'base', 'worktop', 'basin', 'open', 'tall', 'wall'].includes(m.kind);
     byId.set(m.id, m);

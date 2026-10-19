@@ -483,6 +483,46 @@ function mirror(it, s, cfg, col, m) {
   return g;
 }
 
+// ViClean Tivo / Supreo style shower toilet: tall, near-vertical rimless body, a full-width electronics
+// unit flush across the back of the top, a thick soft-edged lid level with it, side control, wall remote.
+function modernShowerToilet(g, it, W, D, H) {
+  const unitD = Math.min(0.2, D * 0.33), lidT = 0.042, rimY = H - lidT - 0.012;
+  const ease = (f) => Math.sin((f * Math.PI) / 2);
+  const rings = [];
+  const N = 14;
+  for (let k = 0; k <= N; k++) {
+    const f = k / N;
+    // almost vertical sides, rounded underside, very slight flare to the rim
+    const base = k === 0 ? 0.78 : k === 1 ? 0.9 : 0.93 + 0.07 * ease(f);
+    rings.push({ y: rimY * f, sx: base, sz: (k === 0 ? 0.86 : k === 1 ? 0.95 : 0.96 + 0.04 * ease(f)) });
+  }
+  rings.push({ y: rimY + 0.004, sx: 0.995, sz: 0.997 });
+  const body = new THREE.Mesh(loftGeo(W, D, rings), MATS.porcelain);
+  body.castShadow = body.receiveShadow = true; g.add(body);
+  // electronics unit across the back
+  const unit = new THREE.Mesh(new RoundedBoxGeometry(W * 0.985, H - rimY + 0.004, unitD, 5, 0.02), MATS.white);
+  unit.position.set(0, (rimY + H) / 2, -D / 2 + unitD / 2); unit.castShadow = true; g.add(unit);
+  // seat + thick closed lid from the unit to the front
+  const front = D / 2, zb = -D / 2 + unitD + 0.004, dd = front - zb, cz = (front + zb) / 2;
+  const seat = new THREE.Shape(); dPath(seat, W * 0.97, dd + 0.02, cz - 0.01);
+  g.add(slab(seat, 0.01, MATS.white, rimY + 0.002, 0.002));
+  const lid = new THREE.Shape(); dPath(lid, W * 0.955, dd - 0.006, cz - 0.003);
+  g.add(slab(lid, lidT - 0.008, MATS.white, rimY + 0.012, 0.006));
+  // control knob / light on the left side of the unit, logo dot on the lid
+  const knob = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, 0.006, 24), mat('#2b2f33', { roughness: 0.4 }));
+  knob.rotation.z = Math.PI / 2; knob.position.set(-W * 0.4925 - 0.002, (rimY + H) / 2, -D / 2 + unitD * 0.55); g.add(knob);
+  const led = new THREE.Mesh(new THREE.CircleGeometry(0.003, 16), new THREE.MeshBasicMaterial({ color: '#7fd0ff' }));
+  led.rotation.y = -Math.PI / 2; led.position.set(-W * 0.4925 - 0.006, (rimY + H) / 2 + 0.018, -D / 2 + unitD * 0.55); g.add(led);
+  // wall remote control (supplied) beside the pan: 1000 mm on the wall, or on the boxing face below its top
+  const host = flushInfo(it).host;
+  const hostTop = host ? (host.elev + sizeOf(host).h) * MM : Infinity;
+  const ry = Math.min(1.0, hostTop - 0.12) - it.elev * MM;
+  const remote = new THREE.Mesh(new RoundedBoxGeometry(0.05, 0.15, 0.014, 3, 0.006), MATS.white);
+  remote.position.set(-W / 2 - 0.22, ry, -D / 2 + 0.007); remote.castShadow = true; g.add(remote);
+  const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.036, 0.11), mat('#30353a', { roughness: 0.3 }));
+  screen.position.set(-W / 2 - 0.22, ry + 0.008, -D / 2 + 0.0145); g.add(screen);
+}
+
 function toilet(it, s, cfg, col, m) {
   const g = new THREE.Group();
   const W = s.w * MM, D = s.d * MM, H = s.h * MM;
@@ -495,38 +535,42 @@ function toilet(it, s, cfg, col, m) {
     g.traverse((o) => (o.castShadow = true));
     return g;
   }
-  // Wall-hung pan: lofted D-shaped body, narrow at the base and flaring to the rim, back flat to the wall.
-  const ease = (f) => Math.pow(Math.sin((f * Math.PI) / 2), 1.6);
-  const rings = [];
-  const N = 16;
-  for (let k = 0; k <= N; k++) {
-    const f = k / N;
-    const sc = 0.5 + 0.5 * ease(f);
-    rings.push({ y: H * 0.97 * f, sx: (0.62 + 0.38 * ease(f)) * (k === 0 ? 0.94 : 1), sz: sc * (k === 0 ? 0.96 : 1) });
-  }
-  rings.push({ y: H * 0.985, sx: 1, sz: 1 }, { y: H, sx: 0.985, sz: 0.988 }); // softened rim edge
-  const body = new THREE.Mesh(loftGeo(W, D, rings), MATS.porcelain);
-  body.castShadow = body.receiveShadow = true; g.add(body);
-  // dark recess at the wall junction so the pan reads as wall-hung
-  box(W * 0.5, H * 0.5, 0.004, MATS.dark, 0, H * 0.4, -D / 2 + 0.002, g);
-  // seat and closed lid
-  const sd = D - 0.075, scz = 0.0375;
-  const seat = new THREE.Shape(); dPath(seat, W - 0.008, sd, scz);
-  const hole = new THREE.Path(); dPath(hole, W - 0.13, sd - 0.15, scz + 0.035, 64, true); seat.holes.push(hole);
-  g.add(slab(seat, 0.014, MATS.white, H + 0.003, 0.003));
   const shower = m.showertoilet || /viclean/i.test(m.name);
-  const lid = new THREE.Shape(); dPath(lid, W - 0.02, sd - 0.012, scz - 0.002);
-  g.add(slab(lid, shower ? 0.03 : 0.016, MATS.white, H + 0.021, 0.004));
-  if (shower) {
-    // shower-toilet unit: housing behind the lid and a small status light
-    const unit = new THREE.Mesh(new RoundedBoxGeometry(W * 0.86, 0.075, 0.14, 4, 0.025), MATS.white);
-    unit.position.set(0, H + 0.035, -D / 2 + 0.075); unit.castShadow = true; g.add(unit);
-    const led = new THREE.Mesh(new THREE.CircleGeometry(0.004, 16), new THREE.MeshBasicMaterial({ color: '#7fd0ff' }));
-    led.position.set(W * 0.3, H + 0.06, -D / 2 + 0.146); g.add(led);
-  }
-  for (const x of [-0.07, 0.07]) {
-    const hinge = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, 0.035, 16), MATS.chrome);
-    hinge.rotation.z = Math.PI / 2; hinge.position.set(x, H + 0.016, -D / 2 + 0.05); g.add(hinge);
+  if (shower && /tivo|supreo/i.test(m.name)) {
+    modernShowerToilet(g, it, W, D, H);
+  } else {
+    // Wall-hung pan: lofted D-shaped body, narrow at the base and flaring to the rim, back flat to the wall.
+    const ease = (f) => Math.pow(Math.sin((f * Math.PI) / 2), 1.6);
+    const rings = [];
+    const N = 16;
+    for (let k = 0; k <= N; k++) {
+      const f = k / N;
+      const sc = 0.5 + 0.5 * ease(f);
+      rings.push({ y: H * 0.97 * f, sx: (0.62 + 0.38 * ease(f)) * (k === 0 ? 0.94 : 1), sz: sc * (k === 0 ? 0.96 : 1) });
+    }
+    rings.push({ y: H * 0.985, sx: 1, sz: 1 }, { y: H, sx: 0.985, sz: 0.988 }); // softened rim edge
+    const body = new THREE.Mesh(loftGeo(W, D, rings), MATS.porcelain);
+    body.castShadow = body.receiveShadow = true; g.add(body);
+    // dark recess at the wall junction so the pan reads as wall-hung
+    box(W * 0.5, H * 0.5, 0.004, MATS.dark, 0, H * 0.4, -D / 2 + 0.002, g);
+    // seat and closed lid
+    const sd = D - 0.075, scz = 0.0375;
+    const seat = new THREE.Shape(); dPath(seat, W - 0.008, sd, scz);
+    const hole = new THREE.Path(); dPath(hole, W - 0.13, sd - 0.15, scz + 0.035, 64, true); seat.holes.push(hole);
+    g.add(slab(seat, 0.014, MATS.white, H + 0.003, 0.003));
+    const lid = new THREE.Shape(); dPath(lid, W - 0.02, sd - 0.012, scz - 0.002);
+    g.add(slab(lid, shower ? 0.03 : 0.016, MATS.white, H + 0.021, 0.004));
+    if (shower) {
+      // shower-toilet unit: housing behind the lid and a small status light
+      const unit = new THREE.Mesh(new RoundedBoxGeometry(W * 0.86, 0.075, 0.14, 4, 0.025), MATS.white);
+      unit.position.set(0, H + 0.035, -D / 2 + 0.075); unit.castShadow = true; g.add(unit);
+      const led = new THREE.Mesh(new THREE.CircleGeometry(0.004, 16), new THREE.MeshBasicMaterial({ color: '#7fd0ff' }));
+      led.position.set(W * 0.3, H + 0.06, -D / 2 + 0.146); g.add(led);
+    }
+    for (const x of [-0.07, 0.07]) {
+      const hinge = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, 0.035, 16), MATS.chrome);
+      hinge.rotation.z = Math.PI / 2; hinge.position.set(x, H + 0.016, -D / 2 + 0.05); g.add(hinge);
+    }
   }
   // flush plate: on the wall / boxing face above the pan, or flat on top of the boxing (set in the WC's details)
   const fl = flushInfo(it, s);
@@ -769,22 +813,51 @@ function niche(it, s, m) {
   return g;
 }
 
+// Wall-mounted (concealed) basin mixer, modelled on hansgrohe Logis / Vernis / Vivenis:
+//  - one low, wide plate with the spout on the left and the lever body on the right (Logis, generic)
+//  - two separate square plates, spout plate + lever plate ("Fine" / two-hole versions)
+//  - spout only (products sold as "…concealed, spout")
+// The spout is a flat blade that tapers and dips slightly towards a downward outlet.
+function spoutBlade(len, wBack, wTip, tBack, tTip, drop) {
+  const g = new THREE.BoxGeometry(1, 1, 1, 1, 1, 6);
+  const pos = g.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const f = pos.getZ(i) + 0.5;                 // 0 at the wall, 1 at the tip
+    const w = wBack + (wTip - wBack) * f, t = tBack + (tTip - tBack) * f;
+    pos.setXYZ(i, pos.getX(i) * w, pos.getY(i) * t - drop * f * f, f * len);
+  }
+  g.computeVertexNormals();
+  return g;
+}
 function wallTap(it, s, m) {
   const g = new THREE.Group();
   const W = s.w * MM, D = s.d * MM, H = s.h * MM;
   const mm = metalMat(colourName(it));
-  const plate = new THREE.Mesh(new RoundedBoxGeometry(W, H, 0.008, 3, 0.004), mm);
-  plate.position.set(0, H / 2, -D / 2 + 0.004); g.add(plate);
-  const reach = D - 0.008;
-  const spout = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, reach, 20), mm);
-  spout.rotation.x = Math.PI / 2; spout.position.set(0, H / 2, -D / 2 + 0.008 + reach / 2); g.add(spout);
-  const aer = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.009, 0.004, 20), MATS.dark);
-  aer.position.set(0, H / 2 - 0.0105, D / 2 - 0.012); g.add(aer);
-  const lx = W / 2 - 0.035;
-  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.03, 24), mm);
-  hub.rotation.x = Math.PI / 2; hub.position.set(lx, H / 2, -D / 2 + 0.023); g.add(hub);
-  const lever = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.06, 0.008), mm);
-  lever.position.set(lx, H / 2 - 0.025, -D / 2 + 0.04); g.add(lever);
+  const n = (m.name || '').toLowerCase();
+  const back = -D / 2;
+  const spoutOnly = /\bspout\b/.test(n) && !/mixer with|with lever/.test(n);
+  const split = !spoutOnly && /\bfine\b|2-hole|two-hole|separate/.test(n);
+  const ph = Math.min(H, 0.085);                     // plate height
+  const plate = (w, h, x, y) => { const p = new THREE.Mesh(new RoundedBoxGeometry(w, h, 0.01, 2, 0.003), mm); p.position.set(x, y, back + 0.005); g.add(p); };
+  let spoutX, leverX;
+  if (spoutOnly) { plate(Math.min(W, 0.07), Math.min(ph, 0.07), 0, ph / 2); spoutX = 0; }
+  else if (split) { const sq = Math.min(ph, W / 2.6); plate(sq, sq, -W / 2 + sq / 2, sq / 2); plate(sq, sq, W / 2 - sq / 2, sq / 2); spoutX = -W / 2 + sq / 2; leverX = W / 2 - sq / 2; }
+  else { plate(W, ph, 0, ph / 2); spoutX = -W * 0.12; leverX = W * 0.3; }
+  // spout: flat tapered blade from the wall to the outlet
+  const len = Math.max(0.08, D - 0.01);
+  const blade = new THREE.Mesh(spoutBlade(len, 0.052, 0.04, 0.026, 0.014, 0.012), mm);
+  const sy = spoutOnly ? ph / 2 : ph * 0.36;
+  blade.position.set(spoutX, sy, back + 0.01); g.add(blade);
+  const outlet = new THREE.Mesh(new THREE.BoxGeometry(0.026, 0.003, 0.018), MATS.dark);
+  outlet.position.set(spoutX, sy - 0.012 - 0.0085, back + 0.01 + len - 0.018); g.add(outlet);
+  if (leverX != null) {
+    // lever body (rounded block) with the lever angled forward and down
+    const body = new THREE.Mesh(new RoundedBoxGeometry(0.044, 0.05, 0.05, 3, 0.014), mm);
+    const by = split ? ph * 0.55 : ph * 0.62;
+    body.position.set(leverX, by, back + 0.035); g.add(body);
+    const lever = new THREE.Mesh(new RoundedBoxGeometry(0.03, 0.012, 0.075, 2, 0.005), mm);
+    lever.position.set(leverX, by + 0.004, back + 0.085); lever.rotation.x = 0.35; g.add(lever);
+  }
   g.traverse((o) => (o.castShadow = true));
   return g;
 }
