@@ -3,6 +3,7 @@ import { store, emit, checkpoint, commit, select, sizeOf, modelOf, coloursOf, cf
 import { wallsOf, outerPts, distToSeg, pointInPoly, itemCorners, toLocal, rayToWalls, polyBounds, snap, rad, deg, normAngle, signedArea } from './geom.js';
 import { ABOVE_FLOOR_DASHED, byId, STACKS_ON } from './catalog.js';
 import { placeItem, ridersOf, applyRiders, nearestWall } from './place.js';
+import { braceInfo, flushInfo } from './models3d.js';
 
 const ACCENT = '#2f5d8a';
 const WALL = '#3b4048';
@@ -121,10 +122,11 @@ export function render(ctx, forExport) {
   ctx.restore();
 
   // items (floor first, then by elevation)
-  const layer = (it) => { const k = modelOf(it)?.kind; return k === 'falsewall' ? -1 : ['walltap', 'showervalve', 'showerhead', 'towelholder', 'tap', 'handshower', 'showerrail', 'accessory'].includes(k) ? 5000 : it.elev; };
+  const layer = (it) => { const k = modelOf(it)?.kind; return k === 'falsewall' ? -1 : ['walltap', 'showervalve', 'showerhead', 'towelholder', 'tap', 'handshower', 'showerrail', 'accessory', 'porterset', 'porter', 'walloutlet'].includes(k) ? 5000 : it.elev; };
   const items = [...d.items].sort((a, b) => layer(a) - layer(b));
   if (plan.tool === 'room' && !forExport) ctx.globalAlpha = 0.35;
-  for (const it of items) drawItem(ctx, it, px);
+  const inWall = (it) => modelOf(it)?.kind === 'niche' || modelOf(it)?.recessed;
+  for (const it of items) if (!inWall(it)) drawItem(ctx, it, px);
   ctx.globalAlpha = 1;
 
   // walls
@@ -136,6 +138,8 @@ export function render(ctx, forExport) {
 
   // openings
   for (const op of d.openings) drawOpening(ctx, op, walls, px);
+  // niches are drawn over the walls they're cut into
+  for (const it of items) if (inWall(it)) drawItem(ctx, it, px);
 
   // selected wall highlight
   const sel = store.sel;
@@ -373,6 +377,16 @@ function drawItem(ctx, it, px) {
       break;
     }
     case 'toilet': case 'wc': {
+      if (m.kind === 'toilet' && it.cfg?.flush === 'top') {
+        const f = flushInfo(it, s);
+        if (f.mode === 'top' && f.host) {
+          // top-mounted flush plate on the boxing behind the pan
+          ctx.save(); ctx.setLineDash([]); ctx.fillStyle = '#ffffff'; ctx.strokeStyle = '#59606b';
+          ctx.fillRect(-110, -hd - f.depth / 2 - 70, 220, 140); ctx.strokeRect(-110, -hd - f.depth / 2 - 70, 220, 140);
+          for (const x of [-45, 45]) { ctx.beginPath(); ctx.arc(x, -hd - f.depth / 2, 30, 0, Math.PI * 2); ctx.stroke(); }
+          ctx.restore();
+        }
+      }
       ctx.fillStyle = '#ffffff';
       const back = m.kind === 'wc' ? 190 : 60;
       ctx.beginPath(); ctx.rect(-hw, -hd, w, back); ctx.fill(); ctx.stroke();
@@ -402,6 +416,17 @@ function drawItem(ctx, it, px) {
       ctx.beginPath(); ctx.arc(0, 0, 45, 0, Math.PI * 2); ctx.stroke();
       break;
     }
+    case 'wetpanel': {
+      const flip = it.cfg?.channel === 'end' ? -1 : 1;
+      ctx.setLineDash([]);
+      ctx.strokeStyle = '#5f8fb3'; ctx.lineWidth = Math.max(3 * px, 8);
+      ctx.beginPath(); ctx.moveTo(-hw, 0); ctx.lineTo(hw, 0); ctx.stroke();
+      ctx.fillStyle = '#8c939b'; ctx.fillRect(-flip * hw - (flip > 0 ? 0 : 20), -11, 20, 22);
+      const b = braceInfo(it);
+      ctx.strokeStyle = b.fits ? '#8c939b' : '#d0602a'; ctx.lineWidth = 1.5 * px; ctx.setLineDash([6 * px, 4 * px]);
+      ctx.beginPath(); ctx.moveTo(b.fx, 0); ctx.lineTo(b.fx, (b.side === 'front' ? 1 : -1) * b.len); ctx.stroke(); ctx.setLineDash([]);
+      break;
+    }
     case 'glass': {
       ctx.strokeStyle = '#5f8fb3'; ctx.lineWidth = 3 * px;
       ctx.beginPath();
@@ -422,6 +447,11 @@ function drawItem(ctx, it, px) {
       ctx.beginPath(); for (let x = -hw + 40; x < hw - 20; x += 60) { ctx.moveTo(x, -hd + 15); ctx.lineTo(x, hd - 15); } ctx.save(); ctx.strokeStyle = 'rgba(89,96,107,0.35)'; ctx.stroke(); ctx.restore();
       break;
     }
+    case 'niche': {
+      ctx.setLineDash([5 * px, 3 * px]); ctx.lineWidth = 1.5 * px; ctx.strokeStyle = '#f2b84b';
+      ctx.fillStyle = 'rgba(242,184,75,0.28)'; ctx.beginPath(); ctx.rect(-hw, -hd, w, d); ctx.fill(); ctx.stroke(); ctx.setLineDash([]);
+      break;
+    }
     case 'falsewall': {
       ctx.setLineDash([]);
       ctx.fillStyle = '#9aa0a8'; ctx.beginPath(); ctx.rect(-hw, -hd, w, d); ctx.fill(); ctx.stroke();
@@ -431,7 +461,7 @@ function drawItem(ctx, it, px) {
       if (n.on) { ctx.strokeStyle = '#f2b84b'; ctx.lineWidth = 1.5 * px; ctx.setLineDash([6 * px, 4 * px]); const y = hd - Math.min(d - 10, n.depth); ctx.beginPath(); ctx.moveTo(-hw, y); ctx.lineTo(hw, y); ctx.stroke(); ctx.setLineDash([]); }
       break;
     }
-    case 'towelholder': case 'tap': case 'handshower': case 'showerrail': case 'accessory': {
+    case 'towelholder': case 'tap': case 'handshower': case 'showerrail': case 'accessory': case 'porterset': case 'porter': case 'walloutlet': {
       ctx.setLineDash([]); ctx.fillStyle = '#c9ccd0'; ctx.beginPath(); ctx.rect(-hw, -hd, w, Math.max(d, 15)); ctx.fill(); ctx.stroke();
       break;
     }
@@ -464,7 +494,7 @@ function drawItem(ctx, it, px) {
   }
   ctx.setLineDash([]);
   // label
-  if (w * plan.scale > 50 && !['glass', 'mirror', 'walltap', 'showervalve', 'showerhead', 'falsewall', 'towelholder', 'tap', 'handshower', 'showerrail', 'accessory'].includes(m.kind)) {
+  if (w * plan.scale > 50 && !['glass', 'mirror', 'walltap', 'showervalve', 'showerhead', 'falsewall', 'niche', 'wetpanel', 'towelholder', 'tap', 'handshower', 'showerrail', 'accessory', 'porterset', 'porter', 'walloutlet'].includes(m.kind)) {
     const sku = m.generic ? '' : it.custom ? 'MTM' : (m.sizes[it.size]?.variants[0]?.sku || '').split('-')[0];
     const lbl = `${sku ? sku + ' · ' : ''}${Math.round(w)}`;
     if (!(m.kind === 'vanity' && hasRider(it))) text(ctx, lbl, 0, m.kind === 'basin' ? hd - 25 : 0, px, { size: 10, color: '#3d444e', angle: readableAngle(rad(it.rot)) - rad(it.rot) });

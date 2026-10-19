@@ -45,6 +45,8 @@ def dims(p,L):
 def kind_of(cat,name):
     n=name.lower(); c=cat.lower()
     if BRAND!='hansgrohe':
+        if 'viclean' in c or 'viclean' in n:
+            return None if re.search(r'seat|lid|remote|spare|kit|set for|cover', n) else 'toilet'
         if 'washbasin' in c:
             if re.search(r'surface-mounted|countertop|bowl|top-mounted',n): return 'ctbasin'
             return 'basin'
@@ -59,7 +61,12 @@ def kind_of(cat,name):
             if re.search(r'shower',n): return 'showervalve'
             return 'tap'
         return None
-    # hansgrohe
+    # hansgrohe — hand-shower kits first (their names mention hoses, which the skip rule below would drop)
+    if re.search(r'shower sets with shower holder', c) or re.search(r'porter set|holder set|duschkopfhalterungset|bidette', n): return 'porterset'
+    if re.search(r'shower sets with shower bar', c): return 'showerrail'
+    if 'fixfit' in n and 'porter' in n: return 'porter'
+    if re.search(r'fixfit|wall outlet|wall connection elbow|hose connection', n) and not re.search(r'spare|seal|o-ring', n): return 'walloutlet'
+    if re.search(r'\bporter', n): return 'porter'
     if re.search(r'spare|cartridge|basic set|ibox|basic body|hose|cover|connector|adapter|extension|seal|o-ring|aerator|installation|rough|mounting|repair|filter|cleaning|^set ', n): return None
     if re.search(r'towel ring|towel holder|towel bar|towel rail|towel hook|bath towel|hand towel|hook', n): return 'towelholder'
     if 'accessoir' in c or re.search(r'addstoris|wallstoris|logis universal', c): return 'accessory'
@@ -92,8 +99,13 @@ for p in P:
     if not k or GERMAN.search(name) or re.search(r'\bseat\b',name,re.I) and k in ('toilet','wc'): continue
     L,_=lines(p['url'])
     w,d,h=dims(p,L)
+    if not w:
+        # fittings often list only height/projection: use the head size if given, else a typical body width
+        head=next((num(m.group(1)) for l in L[:700] for m in [re.search(r'(?:shower head size|head diameter|spray disc)[^\d]{0,12}(\d+)\s*mm',l,re.I)] if m), None)
+        typical={'tap':50,'walltap':160,'showervalve':155,'porterset':120,'handshower':110,'porter':60,'walloutlet':60,'showerhead':250}
+        if k in typical: w=head or typical[k]
     if not w: continue
-    defaults={'walltap':(60,180),'tap':(160,170),'showervalve':(80,160),'showerhead':(400,40),'handshower':(80,250),'showerrail':(100,1000),'towelholder':(70,60),'accessory':(100,100)}
+    defaults={'walltap':(60,180),'tap':(160,170),'showervalve':(80,160),'showerhead':(400,40),'handshower':(80,250),'showerrail':(100,1000),'towelholder':(70,60),'accessory':(100,100),'porterset':(130,330),'porter':(70,90),'walloutlet':(60,50)}
     if k in defaults:
         dd,hh=defaults[k]; d=d or dd; h=h or hh
     if not d or not h:
@@ -102,8 +114,8 @@ for p in P:
         elif k in('toilet','wc'): h=h or 350
         elif k=='bath': h=h or 600
         if not d or not h: continue
-    rng = p['range'] if BRAND!='hansgrohe' else (p['cat'].split(' | ')[0])
-    rng_label={'collaro':'Collaro','subway':'Subway 3.0'}.get(rng,rng)
+    rng = p['range'] if BRAND!='hansgrohe' else re.split(r'\s*\|\s*', p['cat'])[0]
+    rng_label={'collaro':'Collaro','subway':'Subway 3.0','viclean':'ViClean','Shower sets with shower holder':'Hand shower sets','Shower sets with shower bar':'Shower rail sets','Wall outlets':'FixFit & Porter','Shower holders':'FixFit & Porter'}.get(rng,rng)
     cname=clean(name)
     mid=re.sub(r'[^a-z0-9]+','-',(PREFIX+' '+rng_label+' '+k+' '+cname).lower()).strip('-')[:120]
     nl=name.lower()
@@ -112,7 +124,7 @@ for p in P:
     m=models.setdefault(mid,{'id':mid,'name':(BRAND+' '+cname) if BRAND!='hansgrohe' else 'hansgrohe '+cname,'brand':BRAND,'range':rng_label,'cat':p['cat'],'kind':k,
         'front':front_of(name),'drawers':min(nd,2),'cols':2 if nd>=4 else 1,'doors':0 if nd else min(ndo,2),
         'hinge':'L' if re.search(r'hinged left|left hinged|left-hinged|hinge left',nl) else ('R' if re.search(r'hinged right|right hinged|right-hinged|hinge right',nl) else ''),
-        'double':'double' in nl,'mtm':False,'shape':'round' if re.search(r'round|oval|circle|ring|\bs\b|croma 100|crometta 85|select s',nl) and not re.search(r'\b(e|q)\b|angular|square|softcube',nl) else 'rect','sizes':{}})
+        'double':'double' in nl,'mtm':False,'showertoilet':'viclean' in nl,'shape':'round' if re.search(r'round|oval|circle|ring|\bs\b|croma 100|crometta 85|select s',nl) and not re.search(r'\b(e|q)\b|angular|square|softcube',nl) else 'rect','sizes':{}})
     sk=f'{round(w)}x{round(d)}x{round(h)}'
     sz=m['sizes'].setdefault(sk,{'w':round(w),'d':round(d),'h':round(h),'variants':[]})
     img=p.get('image')

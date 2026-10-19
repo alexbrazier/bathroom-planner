@@ -80,8 +80,30 @@ export function placeItem(it, p, opts = {}) {
     }
   }
 
-  // 2. Snap against the nearest wall.
-  if (WALL_MOUNTED.has(m.kind)) {
+  // 2a. Glass panels stand end-on to a wall (channel against it), not flat against it.
+  if (m.kind === 'wetpanel' || (m.kind === 'glass' && s.d <= 300)) {
+    const walls = [...wallsOf(store.d.room.pts), ...builtOutFaces(it, s, exclude)];
+    let best = null;
+    for (const w of walls) {
+      const h = distToSeg(p, w.a, w.b);
+      if (h.d < s.w / 2 + Math.max(250, tol * 3) && (!best || h.d < best.d)) best = { w, h };
+    }
+    if (best) {
+      const { w } = best;
+      const flip = it.cfg?.channel === 'end' ? -1 : 1;
+      it.rot = normAngle(deg(Math.atan2(w.ny, w.nx)) + (flip < 0 ? 180 : 0));
+      let t = (p.x - w.a.x) * w.ux + (p.y - w.a.y) * w.uy;
+      // snap the glass line to the wall ends (+20 mm for a tray/tile lip) or to the grid
+      const cands = [20, w.len - 20];
+      t = cands.find((c) => Math.abs(t - c) < tol) ?? snap(t, GRID);
+      it.x = w.a.x + w.ux * t + w.nx * (s.w / 2);
+      it.y = w.a.y + w.uy * t + w.ny * (s.w / 2);
+      return guides;
+    }
+  }
+
+  // 2. Snap against the nearest wall (ceiling-mounted shower heads hang free).
+  if (WALL_MOUNTED.has(m.kind) && !(m.kind === 'showerhead' && /ceiling/i.test(m.name))) {
     const walls = [...wallsOf(store.d.room.pts), ...builtOutFaces(it, s, exclude)];
     let best = null;
     for (const w of walls) {
@@ -118,7 +140,8 @@ export function placeItem(it, p, opts = {}) {
         }
       }
       t = snapped ? snapped.t : snap(t, GRID);
-      const off = s.d / 2;
+      // niches sit inside the wall with the front flush; recessed cabinets sit in it with the front ~5 mm proud
+      const off = m.kind === 'niche' ? -s.d / 2 : m.recessed ? -s.d / 2 + 5 : s.d / 2;
       it.x = w.a.x + w.ux * t + w.nx * off;
       it.y = w.a.y + w.uy * t + w.ny * off;
       if (snapped) {

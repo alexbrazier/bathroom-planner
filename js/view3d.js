@@ -166,6 +166,7 @@ function disposeGroup(g) {
 
 export function rebuildRoom() {
   if (!v3.ready) return;
+  v3.lastNiche = nicheSignature();
   const { roomGroup } = v3;
   disposeGroup(roomGroup);
   const room = store.d.room;
@@ -195,27 +196,44 @@ export function rebuildRoom() {
   for (const w of walls) {
     const g = new THREE.Group();
     const ops = store.d.openings.filter((o) => o.wall === w.i).sort((a, b) => a.offset - b.offset);
-    // intervals along the wall
+    // Split the wall into vertical strips at door/window/niche edges; each strip is stacked from
+    // full-depth pieces, nothing (doors/windows) and recessed pieces (niches).
+    const nis = nichesOnWall(w, room);
+    const ts = new Set([0, w.len]);
+    for (const o of ops) { ts.add(Math.max(0, Math.min(w.len, o.offset))); ts.add(Math.max(0, Math.min(w.len, o.offset + o.width))); }
+    for (const ni of nis) { ts.add(ni.t0); ts.add(ni.t1); }
+    const tl = [...ts].sort((x, y) => x - y);
     const cuts = [];
-    let t = 0;
-    for (const o of ops) {
-      const a = Math.max(0, o.offset), b = Math.min(w.len, o.offset + o.width);
-      if (a > t) cuts.push({ t0: t, t1: a, y0: 0, y1: room.height });
-      cuts.push({ t0: a, t1: b, y0: 0, y1: o.sill, op: o });
-      cuts.push({ t0: a, t1: b, y0: Math.min(room.height, o.sill + o.height), y1: room.height, op: o });
-      t = b;
+    for (let k = 0; k < tl.length - 1; k++) {
+      const t0 = tl[k], t1 = tl[k + 1], tm = (t0 + t1) / 2;
+      if (t1 - t0 < 0.5) continue;
+      const op = ops.find((o) => o.offset <= tm && o.offset + o.width >= tm);
+      const here = nis.filter((ni) => ni.t0 <= tm && ni.t1 >= tm);
+      const ys = new Set([0, room.height]);
+      if (op) { ys.add(op.sill); ys.add(Math.min(room.height, op.sill + op.height)); }
+      for (const ni of here) { ys.add(ni.y0); ys.add(ni.y1); }
+      const yl = [...ys].filter((y) => y >= 0 && y <= room.height).sort((x, y) => x - y);
+      for (let j = 0; j < yl.length - 1; j++) {
+        const y0 = yl[j], y1 = yl[j + 1], ym = (y0 + y1) / 2;
+        if (op && ym > op.sill && ym < op.sill + op.height) continue;
+        const ni = here.find((n2) => ym > n2.y0 && ym < n2.y1);
+        const last = cuts[cuts.length - 1];
+        const depth = ni ? ni.depth : 0;
+        if (last && last.t0 === t0 && last.y1 === y0 && last.depth === depth) last.y1 = y1;
+        else cuts.push({ t0, t1, y0, y1, depth });
+      }
     }
-    if (t < w.len) cuts.push({ t0: t, t1: w.len, y0: 0, y1: room.height });
     const qa = outer[w.i], qb = outer[(w.i + 1) % n];
-    const innerAt = (tt) => ({ x: w.a.x + w.ux * tt, y: w.a.y + w.uy * tt });
+    const innerAt = (tt, dd = 0) => ({ x: w.a.x + w.ux * tt - w.nx * dd, y: w.a.y + w.uy * tt - w.ny * dd });
     const outerAt = (tt) => tt <= 0 ? qa : tt >= w.len ? qb : { x: w.a.x + w.ux * tt - w.nx * room.thickness, y: w.a.y + w.uy * tt - w.ny * room.thickness };
     for (const c of cuts) {
       if (c.y1 - c.y0 < 0.5 || c.t1 - c.t0 < 0.5) continue;
-      const quad = [innerAt(c.t0), innerAt(c.t1), outerAt(c.t1), outerAt(c.t0)];
+      const quad = [innerAt(c.t0, c.depth), innerAt(c.t1, c.depth), outerAt(c.t1), outerAt(c.t0)];
       const sh = new THREE.Shape(quad.map((p) => new THREE.Vector2(p.x * MM, p.y * MM)));
       const geo = new THREE.ExtrudeGeometry(sh, { depth: (c.y1 - c.y0) * MM, bevelEnabled: false });
       geo.rotateX(Math.PI / 2); geo.translate(0, c.y1 * MM, 0);
       const mesh = new THREE.Mesh(geo, [topMat, shell]); mesh.castShadow = true; mesh.receiveShadow = true; g.add(mesh);
+      if (c.depth) continue; // the niche item finishes its own recess
       // inner face overlay (paint / tiles) with real-world UVs
       const bands = [];
       const tileH = wt.enabled ? wt.height : 0;
@@ -258,6 +276,26 @@ export function rebuildRoom() {
   updateCutaway();
   requestRender();
 }
+
+// Niche items whose front face sits on this wall's inner face (they recess into the wall).
+function nichesOnWall(w, room) {
+  const out = [];
+  for (const it of store.d.items) {
+    if (modelOf(it)?.kind !== 'niche') continue;
+    const s = sizeOf(it);
+    const f = toWorld(it, 0, s.d / 2);
+    const off = (f.x - w.a.x) * w.nx + (f.y - w.a.y) * w.ny;
+    const r = it.rot * Math.PI / 180;
+    const facing = -Math.sin(r) * w.nx + Math.cos(r) * w.ny; // item front (+y) should face into the room
+    if (Math.abs(off) > 20 || facing < 0.98) continue;
+    const t = (f.x - w.a.x) * w.ux + (f.y - w.a.y) * w.uy;
+    const t0 = Math.max(0, t - s.w / 2), t1 = Math.min(w.len, t + s.w / 2);
+    if (t1 - t0 < 10) continue;
+    out.push({ t0, t1, y0: Math.max(0, it.elev), y1: Math.min(room.height, it.elev + s.h), depth: Math.min(s.d, room.thickness - 15) });
+  }
+  return out;
+}
+export const nicheSignature = () => JSON.stringify(store.d.items.filter((o) => modelOf(o)?.kind === 'niche').map((o) => [o.x, o.y, o.rot, o.elev, sizeOf(o).w, sizeOf(o).d, sizeOf(o).h]));
 
 function addOpening(g, w, o, room) {
   const T = room.thickness * MM;
@@ -309,13 +347,32 @@ function updateCutaway() {
     const side = (cam.x / MM - w.a.x) * w.nx + (cam.z / MM - w.a.y) * w.ny;
     g.visible = !(v3.cutaway && side < -10 && cam.y < H * 8);
   }
-  // Built-out walls / boxing hide together with the room wall they're built against.
+  // Built-out walls / boxing hide together with the room wall they're built against; niches with their host.
+  const hidden = new Map();
   for (const it of store.d.items) {
     if (modelOf(it)?.kind !== 'falsewall') continue;
+    const h = builtOutHidden(it, cam, H); hidden.set(it.id, h);
     const g = itemMeshes.get(it.id);
-    if (g) g.visible = !builtOutHidden(it, cam, H);
+    if (g) g.visible = !h;
+  }
+  for (const it of store.d.items) {
+    if (modelOf(it)?.kind !== 'niche' && !modelOf(it)?.recessed) continue;
+    const g = itemMeshes.get(it.id); if (!g) continue;
+    g.visible = !nicheHidden(it, hidden);
   }
   if (v3.ceilingMesh) v3.ceilingMesh.visible = v3.ceiling && v3.camera.position.y < H;
+}
+function nicheHidden(it, fwHidden) {
+  if (!v3.cutaway) return false;
+  const s = sizeOf(it);
+  const f = toWorld(it, 0, s.d / 2);
+  for (const g of v3.walls) { const w = g.userData.wall; if (distToSeg(f, w.a, w.b).d < 25) return !g.visible; }
+  for (const fw of store.d.items) {
+    if (!fwHidden.has(fw.id)) continue;
+    const fs = sizeOf(fw);
+    if (distToSeg(f, toWorld(fw, -fs.w / 2, fs.d / 2), toWorld(fw, fs.w / 2, fs.d / 2)).d < 25) return fwHidden.get(fw.id);
+  }
+  return false;
 }
 function builtOutHidden(it, cam, H) {
   if (!v3.cutaway) return false;
@@ -335,15 +392,18 @@ export function setCeiling(on) { v3.ceiling = on; updateCutaway(); requestRender
 
 // ------------------------------------------------------------------ items
 const itemMeshes = new Map();
-const boxingSig = () => store.d.items.filter((o) => /falsewall|boxing|generic-box/.test(o.model)).map((o) => [o.x, o.y, o.rot, o.elev, o.custom]);
+const boxingSig = () => store.d.items.filter((o) => /falsewall|boxing|generic-box|worktop/.test(o.model)).map((o) => [o.x, o.y, o.rot, o.elev, o.custom]);
 const itemSig = new Map();
 export function rebuildItems() {
   if (!v3.ready) return;
+  // niches cut into room walls: rebuild the walls when they move or resize
+  const ns = nicheSignature();
+  if (ns !== v3.lastNiche) rebuildRoom();
   const { itemGroup } = v3;
   const seen = new Set();
   for (const it of store.d.items) {
     seen.add(it.id);
-    const sig = JSON.stringify([it.model, it.size, it.variant, it.custom, it.cfg, it.niche, it.bespoke, store.d.room.wallColor, store.d.room.wallTile, it.model.includes('toilet') ? [it.x, it.y, it.rot, it.elev, boxingSig()] : 0, /basin/.test(it.model) ? hasTapOn(it) : 0]);
+    const sig = JSON.stringify([it.model, it.size, it.variant, it.custom, it.cfg, it.niche, it.bespoke, store.d.room.wallColor, store.d.room.wallTile, it.model.includes('toilet') ? [it.x, it.y, it.rot, it.elev, boxingSig()] : 0, /basin/.test(it.model) ? hasTapOn(it) : 0, /wetroom-panel/.test(it.model) ? [it.x, it.y, it.rot, store.d.room.pts] : 0, /falsewall|boxing/.test(it.model) ? v3.lastNiche : 0, /showerhead|overhead/.test(it.model) ? [it.elev, store.d.room.height] : 0]);
     let g = itemMeshes.get(it.id);
     if (!g || itemSig.get(it.id) !== sig) {
       if (g) { itemGroup.remove(g); g.traverse((c) => c.geometry?.dispose()); }

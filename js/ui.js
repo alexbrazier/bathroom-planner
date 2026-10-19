@@ -4,6 +4,7 @@ import { store, checkpoint, commit, select, modelOf, sizeOf, variantOf, cfgOf, p
 import { wallsOf, polyBounds, normAngle, snap } from './geom.js';
 import { addModelAt, clearances, splitWall, removeVertex, plan, drawActions } from './plan2d.js';
 import { placeItem, ridersOf, applyRiders, findSupport } from './place.js';
+import { braceInfo, flushInfo } from './models3d.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -188,6 +189,9 @@ function itemPanel(el, it) {
     </div>` : ''}
 
     ${m.kind === 'falsewall' ? nicheHtml(it) : ''}
+    ${m.kind === 'wetpanel' ? braceHtml(it) : ''}
+    ${m.kind === 'toilet' ? flushHtml(it) : ''}
+    ${m.kind === 'niche' ? `<h4>Niche</h4><div class="row"><label>LED strip</label><input type="checkbox" data-k="nkLed" ${it.cfg?.led !== false ? 'checked' : ''}></div><div class="note">Place it on a wall face — it cuts its own recess. On a real wall the depth is limited to the wall thickness.</div>` : ''}
     ${vars.length > 1 || bespoke ? `<h4>Colour</h4><div class="swatches">${swatches}</div>` : ''}
     ${bespoke ? `<div class="row" style="margin-top:8px"><label>Bespoke colour</label><input type="color" data-k="bespoke" value="${it.bespoke || '#8b9a86'}"></div>` : ''}
 
@@ -247,6 +251,11 @@ function itemPanel(el, it) {
     'cl-right': (val) => moveClear(it, 'right', +val),
     'cl-back': (val) => moveClear(it, 'back', +val),
     'cl-front': (val) => moveClear(it, 'front', +val),
+    wpChannel: (val) => mutate(() => { if ((it.cfg?.channel === 'end') !== (val === 'end')) it.rot = normAngle(it.rot + 180); it.cfg = { ...(it.cfg || {}), channel: val }; }),
+    wcFlush: (val) => mutate(() => { it.cfg = { ...(it.cfg || {}), flush: val }; }),
+    nkLed: (val) => mutate(() => { it.cfg = { ...(it.cfg || {}), led: val }; }),
+    wpBrace: (val) => mutate(() => { it.cfg = { ...(it.cfg || {}), brace: val }; }),
+    wpLen: (val) => mutate(() => { it.cfg = { ...(it.cfg || {}), braceLen: val === '' ? null : Math.max(100, +val) }; }),
     nOn: (val) => mutate(() => { it.niche = { ...nicheOf(it), on: val }; }),
     nB: (val) => mutate(() => { it.niche = { ...nicheOf(it), bottom: Math.max(0, +val) }; }),
     nH: (val) => mutate(() => { it.niche = { ...nicheOf(it), height: Math.max(20, +val) }; }),
@@ -261,6 +270,30 @@ function itemPanel(el, it) {
     dup: () => duplicateItem(it),
     del: () => deleteItem(it),
   });
+}
+
+function flushHtml(it) {
+  const f = flushInfo(it);
+  if (!f.host) return `<h4>Flush plate</h4><div class="note">On the wall at 1000 mm. Put the WC against boxing (Walls, boxing &amp; doors) to mount the flush plate on the boxing face or on top of it.</div>`;
+  return `<h4>Flush plate</h4>
+    <div class="row"><label>Position</label><select data-k="wcFlush">
+      <option value="face" ${f.mode === 'face' ? 'selected' : ''}>On the boxing face</option>
+      <option value="top" ${f.mode === 'top' ? 'selected' : ''}>On top of the boxing</option>
+    </select></div>
+    <div class="note">${f.mode === 'top' ? `Flat on top at ${Math.round(f.top)} mm${f.onShelf ? ', set into the shelf on the boxing' : ''} — needs a cistern frame that can be flushed from the top (e.g. Geberit Omega).` : `Centred at ${Math.round(f.faceY)} mm on the boxing face.`}</div>`;
+}
+
+function braceHtml(it) {
+  const c = it.cfg || {}, b = braceInfo(it);
+  const reach = b.toWall == null ? 'No wall found on that side' : `Wall is ${Math.round(b.toWall)} mm away`;
+  const ok = b.toWall != null && b.toWall <= 1005;
+  return `<h4>Fitting</h4>
+    <div class="grid2">
+      <div class="fld"><span>Wall channel end</span><select data-k="wpChannel"><option value="start" ${c.channel !== 'end' ? 'selected' : ''}>Start</option><option value="end" ${c.channel === 'end' ? 'selected' : ''}>End</option></select></div>
+      <div class="fld"><span>Bracing bar to</span><select data-k="wpBrace">${[['auto', 'Nearest wall'], ['front', 'Front side'], ['back', 'Back side']].map(([v, l]) => `<option value="${v}" ${(c.brace || 'auto') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <div class="fld"><span>Bar length (mm)</span><input type="number" data-k="wpLen" value="${c.braceLen ?? ''}" placeholder="auto ${Math.round(b.len)}"></div>
+    </div>
+    <div class="note" style="margin-top:4px">${reach}${b.toWall != null ? (ok ? ' — the included 1000 mm bar cuts to fit.' : ' — <b style="color:var(--danger)">longer than the 1000 mm bar</b>; move the panel or use a T-piece/ceiling support.') : ''}</div>`;
 }
 
 function nicheHtml(it) {

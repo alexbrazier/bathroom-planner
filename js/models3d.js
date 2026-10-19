@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { WOOD, STONE } from './catalog.js';
 import { sizeOf, modelOf, coloursOf, cfgOf, colourName, store, nicheOf } from './state.js';
-import { itemCorners, pointInPoly, toWorld } from './geom.js';
+import { itemCorners, pointInPoly, toWorld, toLocal, rayToWalls } from './geom.js';
 
 const MM = 0.001;
 const matCache = new Map();
@@ -353,8 +353,15 @@ function cabinet(it, s, cfg, col, m) {
   const x0 = -W / 2, x1 = W / 2;
   const inset = cfg.front === 'curved' ? 0.02 : 0;
   if (m.kind === 'mirrorcab') {
-    const n = W >= 1.1 ? 3 : W >= 0.75 ? 2 : 1;
+    const n = s.doors || (W >= 1.1 ? 3 : W >= 0.75 ? 2 : 1);
     for (let i = 0; i < n; i++) front(g, x0 + (W * i) / n, x0 + (W * (i + 1)) / n, 0, H, zf, 'mirror', fm);
+    const fin = colourName(it);
+    if (m.recessed && /trim/i.test(fin) && !/no trim/i.test(fin)) {
+      // trim kit: a slim metal frame around the recess, on the wall face
+      const tm = metalMat(fin), b = 0.022, e = 0.004, zt = zf - 0.004 + e / 2;
+      box(W + 2 * b, b, e, tm, 0, H + b / 2, zt, g); box(W + 2 * b, b, e, tm, 0, -b / 2, zt, g);
+      box(b, H, e, tm, -W / 2 - b / 2, H / 2, zt, g); box(b, H, e, tm, W / 2 + b / 2, H / 2, zt, g);
+    }
     return g;
   }
   if (cfg.drawers) {
@@ -507,17 +514,35 @@ function toilet(it, s, cfg, col, m) {
   const seat = new THREE.Shape(); dPath(seat, W - 0.008, sd, scz);
   const hole = new THREE.Path(); dPath(hole, W - 0.13, sd - 0.15, scz + 0.035, 64, true); seat.holes.push(hole);
   g.add(slab(seat, 0.014, MATS.white, H + 0.003, 0.003));
+  const shower = m.showertoilet || /viclean/i.test(m.name);
   const lid = new THREE.Shape(); dPath(lid, W - 0.02, sd - 0.012, scz - 0.002);
-  g.add(slab(lid, 0.016, MATS.white, H + 0.021, 0.004));
+  g.add(slab(lid, shower ? 0.03 : 0.016, MATS.white, H + 0.021, 0.004));
+  if (shower) {
+    // shower-toilet unit: housing behind the lid and a small status light
+    const unit = new THREE.Mesh(new RoundedBoxGeometry(W * 0.86, 0.075, 0.14, 4, 0.025), MATS.white);
+    unit.position.set(0, H + 0.035, -D / 2 + 0.075); unit.castShadow = true; g.add(unit);
+    const led = new THREE.Mesh(new THREE.CircleGeometry(0.004, 16), new THREE.MeshBasicMaterial({ color: '#7fd0ff' }));
+    led.position.set(W * 0.3, H + 0.06, -D / 2 + 0.146); g.add(led);
+  }
   for (const x of [-0.07, 0.07]) {
     const hinge = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, 0.035, 16), MATS.chrome);
     hinge.rotation.z = Math.PI / 2; hinge.position.set(x, H + 0.016, -D / 2 + 0.05); g.add(hinge);
   }
-  // flush plate on the wall above
-  const plateY = Math.max(H + 0.12, (flushPlateHeight(it, s) - it.elev) * MM);
-  box(0.24, 0.16, 0.008, MATS.white, 0, plateY, -D / 2 + 0.004, g);
-  box(0.09, 0.09, 0.004, MATS.chrome, -0.05, plateY, -D / 2 + 0.01, g);
-  box(0.09, 0.09, 0.004, MATS.chrome, 0.05, plateY, -D / 2 + 0.01, g);
+  // flush plate: on the wall / boxing face above the pan, or flat on top of the boxing (set in the WC's details)
+  const fl = flushInfo(it, s);
+  if (fl.mode === 'top') {
+    const y = (fl.top - it.elev) * MM, z = -D / 2 - fl.depth * MM / 2;
+    box(0.22, 0.006, 0.14, MATS.white, 0, y + 0.003, z, g);
+    for (const x of [-0.045, 0.045]) {
+      const btn = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, 0.004, 32), MATS.chrome);
+      btn.position.set(x, y + 0.007, z); g.add(btn);
+    }
+  } else {
+    const plateY = Math.max(H + 0.12, (fl.faceY - it.elev) * MM);
+    box(0.24, 0.16, 0.008, MATS.white, 0, plateY, -D / 2 + 0.004, g);
+    box(0.09, 0.09, 0.004, MATS.chrome, -0.05, plateY, -D / 2 + 0.01, g);
+    box(0.09, 0.09, 0.004, MATS.chrome, 0.05, plateY, -D / 2 + 0.01, g);
+  }
   return g;
 }
 
@@ -660,38 +685,87 @@ function finishFace(parent, x0, x1, y0, y1, z, elev, paint, horizontal = null) {
   }
 }
 
+// Finish the inside of a recess (back, shelf, ceiling, sides) and optional LED strip.
+// Coordinates are in the host's local frame; zFront is the wall face, depth goes back from it.
+function recessFinish(g, x0, x1, y0, y1, zFront, depth, E, paint, led) {
+  const W = x1 - x0, cx = (x0 + x1) / 2, zc = zFront - depth / 2;
+  const tm = roomTileMat();
+  const tileTop = tm ? store.d.room.wallTile.height * MM - E : -1;
+  const revealMat = (y) => (tm && y < tileTop ? tm : paint);
+  finishFace(g, x0, x1, y0, y1, zFront - depth + 0.0008, E, paint);
+  const shelf = new THREE.Mesh(new THREE.PlaneGeometry(W, depth), revealMat(y0));
+  shelf.rotation.x = -Math.PI / 2; shelf.position.set(cx, y0 + 0.0008, zc); shelf.receiveShadow = true; g.add(shelf);
+  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(W, depth), revealMat(y1));
+  ceil.rotation.x = Math.PI / 2; ceil.position.set(cx, y1 - 0.0008, zc); g.add(ceil);
+  for (const [x, ry] of [[x0 + 0.0008, Math.PI / 2], [x1 - 0.0008, -Math.PI / 2]]) {
+    const side = new THREE.Mesh(new THREE.PlaneGeometry(depth, y1 - y0), revealMat((y0 + y1) / 2));
+    side.rotation.y = ry; side.position.set(x, (y0 + y1) / 2, zc); side.receiveShadow = true; g.add(side);
+  }
+  if (led) {
+    const strip = new THREE.Mesh(new THREE.BoxGeometry(W - 0.01, 0.005, 0.012), new THREE.MeshBasicMaterial({ color: '#fff3dc' }));
+    strip.position.set(cx, y1 - 0.004, zFront - 0.025); g.add(strip);
+    const glow = new THREE.Mesh(new THREE.PlaneGeometry(W, y1 - y0), new THREE.MeshBasicMaterial({ map: ledGlowTexture(), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+    glow.position.set(cx, (y0 + y1) / 2, zFront - depth + 0.002); g.add(glow);
+    const shelfGlow = new THREE.Mesh(new THREE.PlaneGeometry(W, depth), new THREE.MeshBasicMaterial({ color: '#ffe9c4', transparent: true, opacity: 0.18, blending: THREE.AdditiveBlending, depthWrite: false }));
+    shelfGlow.rotation.x = -Math.PI / 2; shelfGlow.position.set(cx, y0 + 0.0015, zc); g.add(shelfGlow);
+  }
+}
+
+// Niche items sitting on the front face of built-out wall `fw` → recesses in fw's local frame (metres).
+export function nichesIn(fw) {
+  const fs = sizeOf(fw), out = [];
+  for (const o of store.d.items) {
+    if (o === fw || modelOf(o)?.kind !== 'niche') continue;
+    const s = sizeOf(o);
+    const f = toWorld(o, 0, s.d / 2);
+    const l = toLocal(fw, f);
+    const dr = Math.abs(((o.rot - fw.rot) % 360 + 540) % 360 - 180);
+    if (dr > 1 || Math.abs(l.y - fs.d / 2) > 20 || Math.abs(l.x) > fs.w / 2) continue;
+    out.push({ x0: Math.max(-fs.w / 2, l.x - s.w / 2) * MM, x1: Math.min(fs.w / 2, l.x + s.w / 2) * MM,
+      y0: Math.max(0, o.elev - fw.elev) * MM, y1: Math.min(fs.h, o.elev + s.h - fw.elev) * MM, depth: Math.min(s.d, fs.d - 15) * MM, item: o });
+  }
+  return out;
+}
+
 function falseWall(it, s, m) {
   const g = new THREE.Group();
   const W = s.w * MM, D = s.d * MM, H = s.h * MM, E = it.elev * MM;
   const paint = mat(store.d.room.wallColor, { roughness: 0.92 });
   const n = nicheOf(it);
   const hasN = n.on && n.bottom - it.elev < s.h && n.height > 0;
-  const nb = hasN ? Math.max(0, n.bottom * MM - E) : H;
-  const nt = hasN ? Math.min(H, nb + n.height * MM) : H;
-  const nd = Math.min(D - 0.015, n.depth * MM);
-  const zf = D / 2 + 0.0008;
-  if (nb > 0) box(W, nb, D, paint, 0, nb / 2, 0, g);
-  finishFace(g, -W / 2, W / 2, 0, nb, zf, E, paint);
+  // recesses: the wall's own full-length niche plus any niche items placed on its face
+  const rec = nichesIn(it);
   if (hasN) {
-    if (H > nt) { box(W, H - nt, D, paint, 0, (nt + H) / 2, 0, g); finishFace(g, -W / 2, W / 2, nt, H, zf, E, paint); }
-    box(W, nt - nb, D - nd, paint, 0, (nb + nt) / 2, -nd / 2, g);
-    const zb = D / 2 - nd + 0.0008;
-    finishFace(g, -W / 2, W / 2, nb, nt, zb, E, paint);
-    // niche shelf and ceiling (tiled to match)
-    const tm = roomTileMat() || paint;
-    const shelf = new THREE.Mesh(new THREE.PlaneGeometry(W, nd), tm);
-    shelf.rotation.x = -Math.PI / 2; shelf.position.set(0, nb + 0.0008, D / 2 - nd / 2); shelf.receiveShadow = true; g.add(shelf);
-    const ceil = new THREE.Mesh(new THREE.PlaneGeometry(W, nd), paint);
-    ceil.rotation.x = Math.PI / 2; ceil.position.set(0, nt - 0.0008, D / 2 - nd / 2); g.add(ceil);
-    if (n.led) {
-      const strip = new THREE.Mesh(new THREE.BoxGeometry(W - 0.01, 0.005, 0.012), new THREE.MeshBasicMaterial({ color: '#fff3dc' }));
-      strip.position.set(0, nt - 0.004, D / 2 - 0.025); g.add(strip);
-      const glow = new THREE.Mesh(new THREE.PlaneGeometry(W, nt - nb), new THREE.MeshBasicMaterial({ map: ledGlowTexture(), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
-      glow.position.set(0, (nb + nt) / 2, D / 2 - nd + 0.002); g.add(glow);
-      const shelfGlow = new THREE.Mesh(new THREE.PlaneGeometry(W, nd), new THREE.MeshBasicMaterial({ color: '#ffe9c4', transparent: true, opacity: 0.18, blending: THREE.AdditiveBlending, depthWrite: false }));
-      shelfGlow.rotation.x = -Math.PI / 2; shelfGlow.position.set(0, nb + 0.0015, D / 2 - nd / 2); g.add(shelfGlow);
+    const nb = Math.max(0, n.bottom * MM - E);
+    rec.push({ x0: -W / 2, x1: W / 2, y0: nb, y1: Math.min(H, nb + n.height * MM), depth: Math.min(D - 0.015, n.depth * MM), own: true });
+  }
+  const zf = D / 2 + 0.0008;
+  // slice into vertical strips at recess edges, then stack solid / recessed pieces
+  const xs = [...new Set([-W / 2, W / 2, ...rec.flatMap((r) => [r.x0, r.x1])])].sort((a, b) => a - b);
+  for (let k = 0; k < xs.length - 1; k++) {
+    const x0 = xs[k], x1 = xs[k + 1], xm = (x0 + x1) / 2;
+    if (x1 - x0 < 0.0005) continue;
+    const here = rec.filter((r) => r.x0 <= xm && r.x1 >= xm);
+    const ys = [...new Set([0, H, ...here.flatMap((r) => [r.y0, r.y1])])].filter((y) => y >= 0 && y <= H).sort((a, b) => a - b);
+    for (let j = 0; j < ys.length - 1; j++) {
+      const y0 = ys[j], y1 = ys[j + 1], ym = (y0 + y1) / 2;
+      if (y1 - y0 < 0.0005) continue;
+      const r = here.find((q) => ym > q.y0 && ym < q.y1);
+      if (r) box(x1 - x0, y1 - y0, D - r.depth, paint, xm, ym, -r.depth / 2, g);
+      else { box(x1 - x0, y1 - y0, D, paint, xm, ym, 0, g); finishFace(g, x0, x1, y0, y1, zf, E, paint); }
     }
   }
+  for (const r of rec) if (r.own) recessFinish(g, r.x0, r.x1, r.y0, r.y1, D / 2, r.depth, E, paint, n.led);
+  return g;
+}
+
+// Niche item: a recess of its own size, cut into whichever wall it is placed on (room wall or built-out wall).
+// The host builds the hole; this draws the finished inside and LED strip. Front face = local +z (wall face).
+function niche(it, s, m) {
+  const g = new THREE.Group();
+  const W = s.w * MM, D = s.d * MM, H = s.h * MM;
+  const paint = mat(store.d.room.wallColor, { roughness: 0.92 });
+  recessFinish(g, -W / 2, W / 2, 0, H, D / 2, D, it.elev * MM, paint, it.cfg?.led !== false);
   return g;
 }
 
@@ -730,33 +804,51 @@ function showerValve(it, s, m) {
   return g;
 }
 
+// How an overhead shower is mounted, from its name (falls back to proportions for unnamed/generic ones).
+export function showerMount(m, s) {
+  const n = (m.name || '').toLowerCase();
+  if (/ceiling-integrated|ceiling integrated|flush/.test(n)) return 'flush';
+  if (/ceiling/.test(n)) return 'ceiling';
+  if (/arm|wall/.test(n) || m.generic) return 'wall';
+  return s.d > s.w * 1.15 ? 'wall' : 'ceiling';
+}
+
 function showerHead(it, s, m) {
   const g = new THREE.Group();
   const W = s.w * MM, D = s.d * MM, H = Math.max(0.01, s.h * MM);
   const mm = metalMat(colourName(it));
   const square = m.shape === 'rect';
-  const onArm = D > W * 1.15 || m.generic;
-  const hd = onArm ? Math.min(W, 0.4) : D;  // head depth
-  const hz = D / 2 - hd / 2;
+  const mount = showerMount(m, s);
+  const wall = mount === 'wall';
+  const hd = wall ? Math.min(W, D - 0.1) : Math.min(W, D);   // head depth (front-to-back)
+  const hz = wall ? D / 2 - hd / 2 : 0;                        // head centre along the arm
   const headGeo = square ? new RoundedBoxGeometry(W, 0.012, hd, 3, 0.004) : new THREE.CylinderGeometry(W / 2, W / 2, 0.01, 48);
-  if (!square && hd !== W) headGeo.scale(1, 1, hd / W);
+  if (!square && Math.abs(hd - W) > 0.001) headGeo.scale(1, 1, hd / W);
   const head = new THREE.Mesh(headGeo, mm); head.position.set(0, 0.012, hz); g.add(head);
   const faceGeo = square ? new THREE.PlaneGeometry(W - 0.016, hd - 0.016) : new THREE.CircleGeometry(W / 2 - 0.008, 48);
-  if (!square && hd !== W) faceGeo.scale(1, hd / W, 1);
+  if (!square && Math.abs(hd - W) > 0.001) faceGeo.scale(1, hd / W, 1);
   const face = new THREE.Mesh(faceGeo, MATS.dark); face.rotation.x = Math.PI / 2; face.position.set(0, 0.0055, hz); g.add(face);
-  if (onArm) {
-    const armY = Math.max(H, 0.04);
-    const flange = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.01, 24), mm);
-    flange.rotation.x = Math.PI / 2; flange.position.set(0, armY, -D / 2 + 0.005); g.add(flange);
+  const bar = (len, axis) => square ? new THREE.Mesh(new THREE.BoxGeometry(axis === 'z' ? 0.02 : 0.02, axis === 'y' ? len : 0.02, axis === 'z' ? len : 0.02), mm)
+    : (() => { const c = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, len, 16), mm); if (axis === 'z') c.rotation.x = Math.PI / 2; return c; })();
+  if (wall) {
+    // wall arm: flange on the wall at the top, arm out to above the head, short drop into it
+    const armY = Math.max(H, 0.06);
+    const flange = square ? new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.01), mm) : new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.01, 24), mm);
+    if (!square) flange.rotation.x = Math.PI / 2;
+    flange.position.set(0, armY, -D / 2 + 0.005); g.add(flange);
     const armLen = hz + D / 2;
-    const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, armLen, 16), mm);
-    arm.rotation.x = Math.PI / 2; arm.position.set(0, armY, -D / 2 + armLen / 2); g.add(arm);
-    const drop = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, armY - 0.012, 12), mm);
-    drop.position.set(0, (armY + 0.012) / 2, hz); g.add(drop);
-  } else {
-    // ceiling/arm connection not included in this product: short stub above the head
-    const stub = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.06, 12), mm); stub.position.set(0, 0.05, hz); g.add(stub);
+    const arm = bar(armLen, 'z'); arm.position.set(0, armY, -D / 2 + armLen / 2); g.add(arm);
+    const drop = bar(armY - 0.012, 'y'); drop.position.set(0, (armY + 0.012) / 2, hz); g.add(drop);
+  } else if (mount === 'ceiling') {
+    // ceiling connection: rod straight up to the ceiling, with a cover plate
+    const top = store.d.room.height * MM - it.elev * MM;
+    const len = Math.max(0.02, top - 0.012);
+    const rod = bar(len, 'y'); rod.position.set(0, 0.012 + len / 2, 0); g.add(rod);
+    const plate = square ? new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.008, 0.07), mm) : new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.008, 24), mm);
+    plate.position.set(0, top - 0.004, 0); g.add(plate);
   }
+  // 'flush' (ceiling-integrated): head only, set its height to the ceiling
+  g.traverse((o) => (o.castShadow = true));
   return g;
 }
 
@@ -907,17 +999,156 @@ function accessory(it, s, m) {
   return g;
 }
 
-// Height (mm above floor) for a WC flush plate: on the face of boxing behind the pan if there is one.
-function flushPlateHeight(it, s) {
-  const behind = toWorld(it, 0, -s.d / 2 - 25);
-  for (const o of store.d.items) {
-    if (o === it) continue;
-    const om = modelOf(o);
-    if (!om || !['falsewall', 'box'].includes(om.kind)) continue;
-    const os = sizeOf(o);
-    if (pointInPoly(behind, itemCorners(o, os.w, os.d))) return Math.min(1000, o.elev + os.h - 110);
+// Hand shower on a hose: wall outlet (FixFit) at the bottom, holder (Porter) at the top with the hand
+// shower parked in it, and the hose hanging in a loop between them. Item height = outlet → holder.
+function wallRose(parent, mm, x, y, back, r = 0.028) {
+  const rose = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.012, 32), mm);
+  rose.rotation.x = Math.PI / 2; rose.position.set(x, y, back + 0.006); parent.add(rose);
+}
+function handShowerMesh(mm, headW, square) {
+  const hs = new THREE.Group();
+  const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.015, 0.17, 20), mm); grip.position.y = 0.085; hs.add(grip);
+  const hr = Math.max(0.04, Math.min(headW / 2, 0.07));
+  const head = square ? new THREE.Mesh(new RoundedBoxGeometry(hr * 2, hr * 2, 0.022, 3, 0.012), mm) : new THREE.Mesh(new THREE.CylinderGeometry(hr, hr, 0.022, 40), mm);
+  if (!square) head.rotation.x = Math.PI / 2;
+  head.position.set(0, 0.17 + hr * 0.85, 0.012); hs.add(head);
+  const face = new THREE.Mesh(square ? new THREE.PlaneGeometry(hr * 2 - 0.012, hr * 2 - 0.012) : new THREE.CircleGeometry(hr - 0.006, 40), MATS.dark);
+  face.position.set(0, 0.17 + hr * 0.85, 0.0235); hs.add(face);
+  return hs;
+}
+function porterSet(it, s, m) {
+  const g = new THREE.Group();
+  const W = s.w * MM, D = s.d * MM, H = Math.max(0.18, s.h * MM);
+  const mm = metalMat(colourName(it));
+  const back = -D / 2;
+  const square = m.shape === 'rect' && /\b(e|q)\b|square|angular/i.test(m.name);
+  // wall outlet
+  wallRose(g, mm, 0, 0.03, back, 0.026);
+  const nip = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.009, 0.03, 16), mm);
+  nip.position.set(0, 0.012, back + 0.024); g.add(nip);
+  // holder
+  const hy = H - 0.03;
+  wallRose(g, mm, 0, hy, back);
+  const cradle = new THREE.Mesh(new RoundedBoxGeometry(0.03, 0.035, 0.05, 2, 0.008), mm);
+  cradle.position.set(0, hy - 0.005, back + 0.035); cradle.rotation.x = 0.35; g.add(cradle);
+  // hand shower parked in the holder, tilted away from the wall
+  const hs = handShowerMesh(mm, W, square);
+  const gripBottom = hy - 0.085;
+  hs.position.set(0, gripBottom, back + 0.05); hs.rotation.x = -0.3; g.add(hs);
+  // hose: from the outlet, down in a loop, and up into the bottom of the handle
+  const z0 = back + 0.04, sag = Math.min(0.45, 0.2 + H * 0.4);
+  const curve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(0, -0.004, z0),
+    new THREE.Vector3(0.03, -sag * 0.55, z0 + 0.03),
+    new THREE.Vector3(0.07, -sag, z0 + 0.06),
+    new THREE.Vector3(0.09, -sag * 0.55, z0 + 0.05),
+    new THREE.Vector3(0.05, gripBottom - 0.12, z0 + 0.02),
+    new THREE.Vector3(0, gripBottom - 0.01, back + 0.05),
+  ]);
+  const hose = new THREE.Mesh(new THREE.TubeGeometry(curve, 64, 0.0065, 10), mm);
+  g.add(hose);
+  g.traverse((o) => (o.castShadow = true));
+  return g;
+}
+function porter(it, s, m) {
+  const g = new THREE.Group();
+  const D = s.d * MM, H = s.h * MM, mm = metalMat(colourName(it)), back = -D / 2;
+  const isOutlet = /fixfit/i.test(m.name);
+  wallRose(g, mm, 0, H / 2, back, isOutlet ? 0.03 : 0.026);
+  const cradle = new THREE.Mesh(new RoundedBoxGeometry(0.03, 0.035, Math.max(0.03, D - 0.012), 2, 0.008), mm);
+  cradle.position.set(0, H / 2, back + 0.012 + Math.max(0.03, D - 0.012) / 2); cradle.rotation.x = 0.35; g.add(cradle);
+  if (isOutlet) { const nip = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.009, 0.03, 16), mm); nip.position.set(0, H / 2 - 0.03, back + 0.024); g.add(nip); }
+  g.traverse((o) => (o.castShadow = true));
+  return g;
+}
+function wallOutlet(it, s, m) {
+  const g = new THREE.Group();
+  const W = s.w * MM, D = s.d * MM, H = s.h * MM, mm = metalMat(colourName(it)), back = -D / 2;
+  const square = /\bq\b|\be\b/i.test(m.name);
+  const rose = square ? new THREE.Mesh(new RoundedBoxGeometry(W, H, 0.012, 2, 0.006), mm) : new THREE.Mesh(new THREE.CylinderGeometry(W / 2, W / 2, 0.012, 32), mm);
+  if (!square) rose.rotation.x = Math.PI / 2;
+  rose.position.set(0, H / 2, back + 0.006); g.add(rose);
+  const elbow = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, D - 0.012, 16), mm);
+  elbow.rotation.x = Math.PI / 2; elbow.position.set(0, H / 2, back + 0.012 + (D - 0.012) / 2); g.add(elbow);
+  const nip = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.009, 0.02, 16), mm);
+  nip.position.set(0, H / 2 - 0.012, back + D - 0.012); g.add(nip);
+  g.traverse((o) => (o.castShadow = true));
+  return g;
+}
+
+// Wet room panel: wall channel on one edge (cfg.channel 'start' = local −x), 8 mm glass, and a straight
+// bracing bar from the top of the free end to the nearest wall on one side (cfg.brace 'auto' | 'front' | 'back').
+export function braceInfo(it) {
+  const s = sizeOf(it), cfg = it.cfg || {};
+  const flip = cfg.channel === 'end' ? -1 : 1;              // which end is free
+  const fx = flip * (s.w / 2 - 60);                          // bar sits 60 mm in from the free edge
+  const r = it.rot * Math.PI / 180;
+  const p = toWorld(it, fx, 0);
+  const dirs = { front: { x: -Math.sin(r), y: Math.cos(r) }, back: { x: Math.sin(r), y: -Math.cos(r) } };
+  const dist = (k) => rayToWalls(p, dirs[k], store.d.room.pts);
+  let side = cfg.brace && cfg.brace !== 'auto' ? cfg.brace : null;
+  if (!side) {
+    const df = dist('front'), db = dist('back');
+    side = df == null ? 'back' : db == null ? 'front' : df <= db ? 'front' : 'back';
   }
-  return 1000;
+  const toWall = dist(side);
+  const len = cfg.braceLen || (toWall != null ? Math.min(toWall, 1500) : 1000);
+  return { side, fx, len, toWall, fits: toWall != null && len >= toWall - 5 && toWall <= 1000 + 5 };
+}
+function wetPanel(it, s, m) {
+  const g = new THREE.Group();
+  const W = s.w * MM, H = s.h * MM, T = Math.max(0.008, s.d * MM);
+  const fin = colourName(it);
+  const mm = metalMat(fin);
+  const cfg = it.cfg || {};
+  const flip = cfg.channel === 'end' ? -1 : 1;
+  const glass = new THREE.MeshPhysicalMaterial({ color: '#e3eef0', metalness: 0, roughness: 0.04, transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthWrite: false });
+  // glass sits in the channel (which takes ~12 mm) and stops 6 mm off the floor
+  const gw = W - 0.012;
+  box(gw, H - 0.006, T, glass, flip * 0.006, (H + 0.006) / 2, 0, g);
+  // polished edges read slightly green
+  const edge = new THREE.MeshStandardMaterial({ color: '#9fc7bf', transparent: true, opacity: 0.55, roughness: 0.1 });
+  box(0.0015, H - 0.006, T + 0.0004, edge, flip * (W / 2 - 0.0008), (H + 0.006) / 2, 0, g);
+  box(gw, 0.0015, T + 0.0004, edge, flip * 0.006, H - 0.0008, 0, g);
+  // wall channel
+  box(0.02, H, 0.022, mm, -flip * (W / 2 - 0.01), H / 2, 0, g);
+  // bracing bar
+  const b = braceInfo(it);
+  const L = b.len * MM, sz = b.side === 'front' ? 1 : -1;
+  const y = H - 0.035, x = b.fx * MM;
+  const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.0095, 0.0095, L, 20), mm);
+  bar.rotation.x = Math.PI / 2; bar.position.set(x, y, sz * L / 2); g.add(bar);
+  const clamp = new THREE.Mesh(new RoundedBoxGeometry(0.045, 0.03, T + 0.024, 2, 0.006), mm);
+  clamp.position.set(x, y, 0); g.add(clamp);
+  const flange = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.01, 24), mm);
+  flange.rotation.x = Math.PI / 2; flange.position.set(x, y, sz * (L - 0.005)); g.add(flange);
+  g.traverse((o) => { if (o.material !== glass) o.castShadow = true; });
+  return g;
+}
+
+// Where a WC's flush plate goes (all mm). If there is boxing behind the pan:
+//  - 'face': on the boxing face, centred ~110 mm below its top (max 1000 mm off the floor)
+//  - 'top' : flat on top of the boxing, or in a worktop/shelf sitting on it, centred over the boxing depth
+// With no boxing it is always on the wall at 1000 mm.
+export function flushInfo(it, s = sizeOf(it)) {
+  const behind = toWorld(it, 0, -s.d / 2 - 25);
+  const host = store.d.items.find((o) => {
+    if (o === it) return false;
+    const k = modelOf(o)?.kind;
+    if (k !== 'falsewall' && k !== 'box') return false;
+    const os = sizeOf(o);
+    return pointInPoly(behind, itemCorners(o, os.w, os.d));
+  });
+  if (!host) return { mode: 'face', faceY: 1000, host: null };
+  const hs = sizeOf(host), hc = itemCorners(host, hs.w, hs.d);
+  let depth = 25;
+  while (depth < 800 && pointInPoly(toWorld(it, 0, -s.d / 2 - depth - 10), hc)) depth += 10;
+  let top = host.elev + hs.h;
+  const mid = toWorld(it, 0, -s.d / 2 - depth / 2);
+  const shelf = store.d.items.find((o) => modelOf(o)?.kind === 'worktop' && Math.abs(o.elev - top) < 6 && pointInPoly(mid, itemCorners(o, sizeOf(o).w, sizeOf(o).d)));
+  if (shelf) top = shelf.elev + sizeOf(shelf).h;
+  const mode = it.cfg?.flush === 'top' ? 'top' : 'face';
+  return { mode, faceY: Math.min(1000, host.elev + hs.h - 110), top, depth, host, onShelf: !!shelf };
 }
 
 export function buildItem(it) {
@@ -943,6 +1174,11 @@ export function buildItem(it) {
     case 'tap': g = deckTap(it, s, m); break;
     case 'handshower': case 'showerrail': g = handShower(it, s, m); break;
     case 'accessory': g = accessory(it, s, m); break;
+    case 'porterset': g = porterSet(it, s, m); break;
+    case 'porter': g = porter(it, s, m); break;
+    case 'walloutlet': g = wallOutlet(it, s, m); break;
+    case 'wetpanel': g = wetPanel(it, s, m); break;
+    case 'niche': g = niche(it, s, m); break;
     case 'shelf':
       if (s.h < 20) { g = new THREE.Group(); box(s.w * MM, s.h * MM, s.d * MM, MATS.glass, 0, s.h * MM / 2, 0, g); box(0.02, 0.03, 0.03, MATS.chrome, -s.w * MM / 2 + 0.04, -0.015, -s.d * MM / 2 + 0.015, g); box(0.02, 0.03, 0.03, MATS.chrome, s.w * MM / 2 - 0.04, -0.015, -s.d * MM / 2 + 0.015, g); }
       else g = cabinet(it, s, cfg, col, m);
