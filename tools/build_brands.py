@@ -2,7 +2,7 @@
 import re,sys,json,html,hashlib,os,subprocess,collections,concurrent.futures as cf
 P=json.load(open(sys.argv[1])); CACHE=sys.argv[2]; OUT=sys.argv[3]; IMG=sys.argv[4]; PREFIX=sys.argv[5]; BRAND=sys.argv[6]
 os.makedirs(IMG,exist_ok=True)
-GERMAN=re.compile(r'folie|beschichtung|verspiegelt|unterschrank|auszüg|waschtisch|ß|\bmit\b|schwarz|eiche|grau\b|glanz|chrom\b|weiss|edelstahl|gebürstet|gold optic|messing|^weiß',re.I)
+GERMAN=re.compile(r'folie|beschichtung|verspiegelt|unterschrank|auszüg|waschtisch|ß|\bmit\b|schwarz|eiche|grau\b|glanz|chrom\b|weiss|edelstahl|gebürstet|gold optic|messing|armatur|^weiß',re.I)
 def lines(url):
     f=os.path.join(CACHE,hashlib.md5(url.encode()).hexdigest()+'.html')
     if not os.path.exists(f): return [], ''
@@ -25,7 +25,10 @@ def dims(p,L):
         elif l in('Height:','Höhe:') and h is None: h=v
         if w and d and h: break
     s=p.get('dims') or ''
-    for k,var in (('W','w'),('B','w'),('D','d'),('T','d'),('H','h')):
+    # baths give "L: 180 W: 80 H: 48 cm" — length is our width, W is our depth
+    keys=(('L','w'),('W','d'),('B','d'),('H','h')) if re.search(r'\bL:\s*\d',s) else (('W','w'),('B','w'),('D','d'),('T','d'),('H','h'))
+    if re.search(r'\bL:\s*\d',s): w=d=None
+    for k,var in keys:
         m=re.search(r'\b'+k+r':\s*([\d.,]+)',s)
         if m:
             v=num(m.group(1))*10
@@ -112,8 +115,9 @@ for p in P:
         if k=='basin': h=h or 165; d=d or 470
         elif k=='mirror': d=d or 40; h=h or 750
         elif k in('toilet','wc'): h=h or 350
-        elif k=='bath': h=h or 600
+        elif k=='bath': h=h or 470
         if not d or not h: continue
+    if k=='bath' and h<540: h+=110  # tub height + leg set = rim height off the floor
     rng = p['range'] if BRAND!='hansgrohe' else re.split(r'\s*\|\s*', p['cat'])[0]
     rng_label={'collaro':'Collaro','subway':'Subway 3.0','viclean':'ViClean','Shower sets with shower holder':'Hand shower sets','Shower sets with shower bar':'Shower rail sets','Wall outlets':'FixFit & Porter','Shower holders':'FixFit & Porter'}.get(rng,rng)
     cname=clean(name)

@@ -4,7 +4,7 @@ import { store, checkpoint, commit, select, modelOf, sizeOf, variantOf, cfgOf, p
 import { wallsOf, polyBounds, normAngle, snap } from './geom.js';
 import { addModelAt, clearances, splitWall, removeVertex, plan, drawActions } from './plan2d.js';
 import { placeItem, ridersOf, applyRiders, findSupport } from './place.js';
-import { braceInfo, flushInfo } from './models3d.js';
+import { braceInfo, flushInfo, bathInfo } from './models3d.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -80,8 +80,14 @@ function priceRange(m) {
 function renderLibrary() {
   const list = $('#libList');
   let models = MODELS.filter(BRANDS.find((b) => b.id === libBrand)?.test || (() => true));
-  if (libQuery) models = models.filter((m) => (m.name + ' ' + m.sizes.map((s) => s.variants[0]?.sku).join(' ')).toLowerCase().includes(libQuery));
-  if (libCat !== 'all' && !libQuery) models = models.filter((m) => catOf(m) === libCat);
+  if (libQuery) {
+    const words = libQuery.split(/\s+/).filter(Boolean);
+    models = models.filter((m) => {
+      const hay = [m.name, m.brand, m.range, ...m.sizes.map((s) => s.variants[0]?.sku)].join(' ').toLowerCase();
+      return words.every((w) => hay.includes(w));
+    });
+  }
+  if (libCat !== 'all') models = models.filter((m) => catOf(m) === libCat);
   const card = (m) => {
     const ws = [...new Set(m.sizes.map((s) => s.w))];
     const meta = m.custom && m.mtm ? 'Any size' : ws.length > 1 ? `W ${Math.min(...ws) / 10}–${Math.max(...ws) / 10} cm` : `${m.sizes[0].w / 10}×${m.sizes[0].d / 10}×${m.sizes[0].h / 10} cm`;
@@ -89,14 +95,14 @@ function renderLibrary() {
     const img = m.thumb ? `<img src="${m.thumb}" loading="lazy" alt="" draggable="false">` : `<div class="ph">${icon(m.kind)}</div>`;
     return `<div class="card" draggable="true" data-id="${m.id}" title="${esc(m.name)}">${img}<div class="nm">${esc(shortName(m.name))}</div><div class="meta">${meta}${pr ? ` · from ${pr}` : ''}</div></div>`;
   };
-  if (libCat === 'all' || libQuery) {
+  if (libCat === 'all') {
     let html = '';
     for (const c of CATS) {
       const ms = models.filter((m) => catOf(m) === c.id);
       if (ms.length) html += `<div class="lib-group">${c.label}</div>` + ms.map(card).join('');
     }
     list.innerHTML = html || '<div class="note">No matches.</div>';
-  } else list.innerHTML = models.map(card).join('');
+  } else list.innerHTML = models.map(card).join('') || '<div class="note">No matches in this category.</div>';
 }
 
 function icon(kind) {
@@ -191,6 +197,7 @@ function itemPanel(el, it) {
     ${m.kind === 'falsewall' ? nicheHtml(it) : ''}
     ${m.kind === 'wetpanel' ? braceHtml(it) : ''}
     ${m.kind === 'toilet' ? flushHtml(it) : ''}
+    ${m.kind === 'bath' && m.shape !== 'oval' ? bathHtml(it, m) : ''}
     ${m.kind === 'niche' ? `<h4>Niche</h4><div class="row"><label>LED strip</label><input type="checkbox" data-k="nkLed" ${it.cfg?.led !== false ? 'checked' : ''}></div><div class="note">Place it on a wall face — it cuts its own recess. On a real wall the depth is limited to the wall thickness.</div>` : ''}
     ${vars.length > 1 || bespoke ? `<h4>Colour</h4><div class="swatches">${swatches}</div>` : ''}
     ${bespoke ? `<div class="row" style="margin-top:8px"><label>Bespoke colour</label><input type="color" data-k="bespoke" value="${it.bespoke || '#8b9a86'}"></div>` : ''}
@@ -253,6 +260,10 @@ function itemPanel(el, it) {
     'cl-front': (val) => moveClear(it, 'front', +val),
     wpChannel: (val) => mutate(() => { if ((it.cfg?.channel === 'end') !== (val === 'end')) it.rot = normAngle(it.rot + 180); it.cfg = { ...(it.cfg || {}), channel: val }; }),
     wcFlush: (val) => mutate(() => { it.cfg = { ...(it.cfg || {}), flush: val }; }),
+    bFront: (val) => mutate(() => { it.cfg = { ...(it.cfg || {}), frontPanel: val }; }),
+    bEnd: (val) => mutate(() => { it.cfg = { ...(it.cfg || {}), endPanel: val }; }),
+    bWaste: (val) => mutate(() => { it.cfg = { ...(it.cfg || {}), wasteEnd: val }; }),
+    bPop: (val) => mutate(() => { it.cfg = { ...(it.cfg || {}), waste: val }; }),
     nkLed: (val) => mutate(() => { it.cfg = { ...(it.cfg || {}), led: val }; }),
     wpBrace: (val) => mutate(() => { it.cfg = { ...(it.cfg || {}), brace: val }; }),
     wpLen: (val) => mutate(() => { it.cfg = { ...(it.cfg || {}), braceLen: val === '' ? null : Math.max(100, +val) }; }),
@@ -270,6 +281,32 @@ function itemPanel(el, it) {
     dup: () => duplicateItem(it),
     del: () => deleteItem(it),
   });
+}
+
+function bathHtml(it, m) {
+  const b = bathInfo(it);
+  const sel = (k, cur, opts) => `<select data-k="${k}">${opts.map(([v, l]) => `<option value="${v}" ${cur === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+  const auto = (on) => `Auto (${on ? 'panel' : 'against wall'})`;
+  const ends = b.left && b.right ? 'both ends' : b.left ? 'left end' : b.right ? 'right end' : 'no end';
+  return `<h4>Panels &amp; waste</h4>
+    <div class="grid2">
+      <div class="fld"><span>Front panel</span>${sel('bFront', b.frontMode, [['auto', auto(b.front)], ['on', 'Yes'], ['off', 'No (tiled / boxed in)']])}</div>
+      <div class="fld"><span>End panel</span>${sel('bEnd', b.endMode, [['auto', `Auto (${ends})`], ['left', 'Left end'], ['right', 'Right end'], ['both', 'Both ends'], ['none', 'None']])}</div>
+      ${b.wasteEnd === 'centre' ? '' : `<div class="fld"><span>Waste &amp; overflow end</span>${sel('bWaste', b.wasteEnd, [['left', 'Left'], ['right', 'Right']])}</div>`}
+    </div>
+    ${m.extras ? `<div class="row" style="margin-top:6px"><label>${esc(m.extras.waste.name)} (${esc(m.extras.waste.price)})</label><input type="checkbox" data-k="bPop" ${b.waste ? 'checked' : ''}></div>
+    <div class="note">Panels are added to the parts list at a guide price for generic acrylic panels cut to size.</div>` : ''}
+    <div class="note">${b.wasteEnd === 'centre' ? 'Double-ended: backrests at both ends, waste in the middle.' : 'The tap end is the waste end; the other end has the backrest.'}</div>`;
+}
+
+// Parts-list extras for an item (bath panels and waste chosen in the bath options).
+function extrasOf(it, m) {
+  if (!m.extras) return [];
+  const b = bathInfo(it), out = [];
+  if (b.waste) out.push(m.extras.waste);
+  if (b.front) out.push(m.extras.front);
+  for (let i = 0; i < (b.left ? 1 : 0) + (b.right ? 1 : 0); i++) out.push(m.extras.end);
+  return out;
 }
 
 function flushHtml(it) {
@@ -523,6 +560,12 @@ export function showBOM(scope = bomScope) {
     const key = it.custom ? `${m.id}|${JSON.stringify(it.custom)}|${v?.colour}|${JSON.stringify(it.cfg || {})}` : v?.sku;
     const r = rows.get(key) || { m, v, s, it, qty: 0, price: priceOf(it), cur: currencyOf(v?.price), rooms: new Set() };
     r.qty++; if (src.name) r.rooms.add(src.name); rows.set(key, r);
+    for (const x of extrasOf(it, m)) {
+      const s = sizeOf(it), dims = x === m.extras.front ? [s.w, 18, s.h - 35] : x === m.extras.end ? [s.d, 18, s.h - 35] : null;
+      const k = `extra|${x.name}|${dims}`;
+      const e = rows.get(k) || { m: { name: x.name + (x.guide ? ' — guide price' : '') }, v: x, s: dims ? { w: dims[0], d: dims[1], h: dims[2] } : null, it: {}, qty: 0, price: parsePrice(x.price), cur: currencyOf(x.price), rooms: new Set() };
+      e.qty++; if (src.name) e.rooms.add(src.name); rows.set(k, e);
+    }
   }
   const list = [...rows.values()];
   const totals = {};
@@ -534,10 +577,10 @@ export function showBOM(scope = bomScope) {
       <td>${r.v?.img || r.m.thumb ? `<img src="${esc(r.v?.img || r.m.thumb)}" alt="">` : ''}</td>
       <td>${r.v?.url ? `<a href="${esc(r.v.url)}" target="_blank" rel="noopener">${esc(r.m.name)}</a>` : esc(r.m.name)}${r.it.custom ? ' <i>(made to measure)</i>' : ''}</td>
       <td>${esc(r.it.custom ? '—' : r.v?.sku)}</td><td>${esc(r.v?.colour)}</td>
-      <td>${r.s.w} × ${r.s.d} × ${r.s.h}</td><td class="num">${r.qty}</td>
+      <td>${r.s ? `${r.s.w} × ${r.s.d} × ${r.s.h}` : ''}</td><td class="num">${r.qty}</td>
       <td class="num">${r.price != null ? fmtPrice(r.price, r.cur) : 'POA'}</td><td class="num">${r.price != null ? fmtPrice(r.price * r.qty, r.cur) : 'POA'}</td></tr>`).join('')}</tbody>
     <tfoot><tr><td colspan="7">Total${unknown ? ' (excluding made-to-measure / POA items)' : ''}</td><td class="num">${Object.entries(totals).map(([c, t]) => fmtPrice(t, c)).join(' + ') || '—'}</td></tr></tfoot></table>
-    <p class="note">Dansani prices are UK list prices from dansani.co.uk (£); Villeroy &amp; Boch and hansgrohe prices are EU retail prices from megabad.com (€). All may have changed; options (lights, sockets, push-open) and handles aren't included.</p>
+    <p class="note">Dansani prices are UK list prices from dansani.co.uk (£); Villeroy &amp; Boch and hansgrohe prices are EU retail prices from megabad.com (€), except the Architectura bath, waste and panels (UK £, heatandplumb.com; panels are a guide price). All may have changed; options (lights, sockets, push-open) and handles aren't included.</p>
     <div class="btns"><button data-csv>Copy as CSV</button></div>`
     : '<p class="note">No Dansani products in the design yet.</p>';
   const scopeHtml = multi ? `<div class="bom-scope"><label><input type="radio" name="bomScope" value="room" ${scope === 'room' ? 'checked' : ''}> This room</label><label><input type="radio" name="bomScope" value="all" ${scope === 'all' ? 'checked' : ''}> All ${store.project.rooms.length} rooms</label></div>` : '';
@@ -546,7 +589,7 @@ export function showBOM(scope = bomScope) {
   $('#bomBody').querySelectorAll('[name=bomScope]').forEach((x) => x.addEventListener('change', () => showBOM(x.value)));
   $('#bom').hidden = false;
   $('#bomBody [data-csv]')?.addEventListener('click', () => {
-    const csv = [['Product', 'SKU', 'Colour', 'W', 'D', 'H', 'Qty', 'Unit price', 'URL'], ...list.map((r) => [r.m.name, r.it.custom ? 'MTM' : r.v?.sku, r.v?.colour, r.s.w, r.s.d, r.s.h, r.qty, r.price ?? '', r.v?.url || ''])]
+    const csv = [['Product', 'SKU', 'Colour', 'W', 'D', 'H', 'Qty', 'Unit price', 'URL'], ...list.map((r) => [r.m.name, r.it.custom ? 'MTM' : r.v?.sku, r.v?.colour, r.s?.w, r.s?.d, r.s?.h, r.qty, r.price ?? '', r.v?.url || ''])]
       .map((row) => row.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
     navigator.clipboard.writeText(csv).then(() => toast('Copied parts list'));
   });

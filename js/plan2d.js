@@ -3,7 +3,7 @@ import { store, emit, checkpoint, commit, select, sizeOf, modelOf, coloursOf, cf
 import { wallsOf, outerPts, distToSeg, pointInPoly, itemCorners, toLocal, rayToWalls, polyBounds, snap, rad, deg, normAngle, signedArea } from './geom.js';
 import { ABOVE_FLOOR_DASHED, byId, STACKS_ON } from './catalog.js';
 import { placeItem, ridersOf, applyRiders, nearestWall } from './place.js';
-import { braceInfo, flushInfo } from './models3d.js';
+import { braceInfo, flushInfo, bathInfo } from './models3d.js';
 
 const ACCENT = '#2f5d8a';
 const WALL = '#3b4048';
@@ -396,6 +396,23 @@ function drawItem(ctx, it, px) {
     }
     case 'bath': {
       ctx.fillStyle = '#ffffff';
+      if (cfg.shape !== 'oval') {
+        const bi = bathInfo(it), duo = bi.wasteEnd === 'centre', dir = bi.wasteEnd === 'left' ? -1 : 1;
+        ctx.beginPath(); ctx.rect(-hw, -hd, w, d); ctx.fill(); ctx.stroke();
+        rrect(ctx, -hw + 65, -hd + 65, w - 130, d - 130, 75); ctx.stroke();
+        // tub floor: steep at the foot (waste) end, long backrest slope at the head end
+        const bw = Math.max(450, duo ? w - 800 : w - 525), bd = Math.max(300, d - 240), fx = duo ? bw / 2 : dir * (hw - 65 - 60), hx = fx - (duo ? 1 : dir) * bw;
+        ctx.save(); ctx.strokeStyle = 'rgba(89,96,107,0.45)'; rrect(ctx, Math.min(fx, hx), -bd / 2, bw, bd, 60); ctx.stroke(); ctx.restore();
+        ctx.beginPath(); ctx.arc(duo ? 0 : dir * (hw - 65 - 60 - 130), 0, 26, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); if (duo) ctx.arc(0, -hd + 72, 14, 0, Math.PI * 2); else ctx.arc(dir * (hw - 72), 0, 14, 0, Math.PI * 2); ctx.stroke();
+        // panels: thick edge on each panelled side
+        ctx.save(); ctx.strokeStyle = '#59606b'; ctx.lineWidth = 4 * px; ctx.beginPath();
+        if (bi.front) { ctx.moveTo(-hw, hd - 9); ctx.lineTo(hw, hd - 9); }
+        if (bi.left) { ctx.moveTo(-hw + 9, -hd); ctx.lineTo(-hw + 9, hd); }
+        if (bi.right) { ctx.moveTo(hw - 9, -hd); ctx.lineTo(hw - 9, hd); }
+        ctx.stroke(); ctx.restore();
+        break;
+      }
       if (cfg.shape === 'oval') { ctx.beginPath(); ctx.ellipse(0, 0, hw, hd, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.beginPath(); ctx.ellipse(0, 0, hw - 70, hd - 70, 0, 0, Math.PI * 2); ctx.stroke(); }
       else { ctx.beginPath(); ctx.rect(-hw, -hd, w, d); ctx.fill(); ctx.stroke(); rrect(ctx, -hw + 70, -hd + 70, w - 140, d - 140, 160); ctx.stroke(); }
       ctx.beginPath(); ctx.arc(-hw + 230, 0, 22, 0, Math.PI * 2); ctx.stroke();

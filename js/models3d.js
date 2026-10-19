@@ -590,7 +590,152 @@ function toilet(it, s, cfg, col, m) {
   return g;
 }
 
+// Built-in bath fitting: which sides get panels (auto = any side not within 30 mm of a wall), which end
+// has the waste, and whether the pop-up waste is included. Used by the 3D model, the plan and the parts list.
+export function bathInfo(it) {
+  const s = sizeOf(it), c = it.cfg || {};
+  const o = toWorld(it, 0, 0);
+  const dir = (lx, ly) => { const p = toWorld(it, lx, ly); return { x: p.x - o.x, y: p.y - o.y }; };
+  const dist = (lx, ly, dx, dy) => rayToWalls(toWorld(it, lx, ly), dir(dx, dy), store.d.room.pts);
+  const open = (d) => d == null || d > 30;
+  const dists = { front: dist(0, s.d / 2 - 1, 0, 1), left: dist(-s.w / 2 + 1, 0, -1, 0), right: dist(s.w / 2 - 1, 0, 1, 0) };
+  const fm = c.frontPanel || 'auto', em = c.endPanel || 'auto';
+  return {
+    front: fm === 'auto' ? open(dists.front) : fm === 'on',
+    left: em === 'auto' ? open(dists.left) : em === 'left' || em === 'both',
+    right: em === 'auto' ? open(dists.right) : em === 'right' || em === 'both',
+    wasteEnd: isDuo(modelOf(it)) ? 'centre' : c.wasteEnd === 'left' ? 'left' : 'right',
+    waste: c.waste !== false,
+    frontMode: fm, endMode: em, dists,
+  };
+}
+
+// Double-ended ("Duo") baths: backrest at both ends, waste in the middle.
+export const isDuo = (m) => /\bduo\b|double.?ended/i.test(m?.name || '');
+
+// Ring-by-ring lofted surface: rings are rounded rectangles {x0, x1, hz, r, y}; bottom ring is capped.
+function rrRing(x0, x1, hz, r, y, k = 6) {
+  const pts = [], w = x1 - x0, cx = (x0 + x1) / 2;
+  r = Math.min(r, w / 2 - 0.001, hz - 0.001);
+  const corners = [[cx + w / 2 - r, hz - r, 0], [cx - w / 2 + r, hz - r, Math.PI / 2], [cx - w / 2 + r, -hz + r, Math.PI], [cx + w / 2 - r, -hz + r, Math.PI * 1.5]];
+  for (const [ox, oz, a0] of corners) for (let i = 0; i <= k; i++) {
+    const a = a0 + (i / k) * Math.PI / 2;
+    pts.push([ox + r * Math.cos(a), y, oz + r * Math.sin(a)]);
+  }
+  return pts;
+}
+function ringLoftGeo(rings) {
+  const pos = [], idx = [], n = rings[0].length;
+  for (const ring of rings) for (const p of ring) pos.push(...p);
+  for (let i = 0; i < rings.length - 1; i++) for (let j = 0; j < n; j++) {
+    const a = i * n + j, b = i * n + (j + 1) % n, c = a + n, d = b + n;
+    idx.push(a, c, b, b, c, d);
+  }
+  const last = rings[rings.length - 1], ci = pos.length / 3;
+  pos.push(last.reduce((t, p) => t + p[0], 0) / n, last[0][1], 0);
+  for (let j = 0; j < n; j++) idx.push((rings.length - 1) * n + j, ci, (rings.length - 1) * n + (j + 1) % n);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx); g.computeVertexNormals();
+  return g;
+}
+
+// Built-in acrylic bath (modelled on the V&B Architectura drawing): 35 mm rim with 65 mm side ledges, steep foot
+// end with waste + overflow, sloping backrest at the head end (both ends on a Duo), on a leg set; optional
+// acrylic front/end panels tucked under the rim.
+function shapedBath(it, s, m) {
+  const g = new THREE.Group();
+  const W = s.w * MM, D = s.d * MM, H = s.h * MM;
+  const info = bathInfo(it), duo = info.wasteEnd === 'centre', dir = info.wasteEnd === 'left' ? -1 : 1;
+  const acrylic = MATS.porcelain;
+  const RIM = 0.035, ow = W - 0.13, od = D - 0.13, dep = Math.min(0.48, H - 0.06);
+  // rim
+  const outer = roundRectPath(new THREE.Shape(), W, D, 0.008);
+  outer.holes.push(roundRectPath(new THREE.Path(), ow, od, 0.075));
+  g.add(slab(outer, RIM, acrylic, H - RIM));
+  // tub: foot end and sides drop steeply then round into the floor; the head end is a long straight slope
+  const bw = Math.max(0.45, duo ? W - 0.8 : W - 0.525), bd = Math.max(0.3, D - 0.24);
+  const footB = duo ? bw / 2 : ow / 2 - 0.06, headB = footB - bw;
+  const rings = [];
+  for (let i = 0; i <= 16; i++) {
+    const t = i / 16, steep = 1 - Math.cos(t * Math.PI / 2);
+    const y = H - (i ? 0.012 + (dep - 0.012) * t : 0);
+    const xf = duo ? ow / 2 - (ow / 2 - footB) * t : ow / 2 - (ow / 2 - footB) * steep;
+    const xh = -ow / 2 + (headB + ow / 2) * t;
+    const hz = od / 2 - (od / 2 - bd / 2) * (0.45 * t + 0.55 * steep);
+    const r = 0.075 + (0.06 - 0.075) * t;
+    const ring = rrRing(xh, xf, hz, r, y);
+    if (dir < 0) for (const p of ring) p[0] = -p[0];
+    rings.push(ring);
+  }
+  const tub = new THREE.Mesh(ringLoftGeo(rings), acrylic.clone());
+  tub.material.side = THREE.DoubleSide; tub.castShadow = tub.receiveShadow = true; g.add(tub);
+  const floorY = H - dep, mid = dir * (footB + headB) / 2;
+  // leg set: base board under the tub floor on four adjustable feet
+  if (floorY > 0.03) {
+    box(bw * 0.85, 0.018, bd * 0.8, MATS.dark, mid, floorY - 0.012, 0, g);
+    const leg = MATS.dark;
+    for (const fx of [-1, 1]) for (const fz of [-1, 1]) {
+      const c = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.016, floorY - 0.02, 12), leg);
+      c.position.set(mid + fx * bw * 0.36, (floorY - 0.02) / 2, fz * bd * 0.34); g.add(c);
+    }
+  }
+  // waste (plug near the foot end) and overflow on the foot wall, 70 mm below the rim
+  const chrome = MATS.chrome;
+  const plug = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.004, 32), info.waste ? chrome : acrylic);
+  plug.position.set(duo ? 0 : dir * (footB - 0.13), floorY + 0.003, 0); g.add(plug);
+  const ov = new THREE.Mesh(new THREE.CylinderGeometry(info.waste ? 0.036 : 0.028, info.waste ? 0.036 : 0.028, 0.012, 32), info.waste ? chrome : acrylic);
+  const yOv = H - 0.07, tOv = (H - 0.012 - yOv) / (dep - 0.012);
+  if (duo) { ov.rotation.x = Math.PI / 2; ov.position.set(0, yOv, -(od / 2 - (od / 2 - bd / 2) * (0.45 * tOv + 0.55 * (1 - Math.cos(tOv * Math.PI / 2)))) + 0.004); }
+  else { ov.rotation.z = Math.PI / 2; ov.position.set(dir * (ow / 2 - (ow / 2 - footB) * (1 - Math.cos(tOv * Math.PI / 2)) - 0.004), yOv, 0); }
+  g.add(ov);
+  // panels sit 8 mm in from the rim edge, floor to the underside of the rim
+  const PT = 0.018, ph = H - RIM, inset = 0.008;
+  const pm = MATS.white;
+  const xl = -W / 2 + inset + (info.left ? PT : 0), xr = W / 2 - inset - (info.right ? PT : 0);
+  if (info.front) {
+    box(xr - xl, ph, PT, pm, (xl + xr) / 2, ph / 2, D / 2 - inset - PT / 2, g);
+    box(xr - xl - 0.004, 0.05, 0.004, MATS.dark, (xl + xr) / 2, 0.025, D / 2 - inset - PT - 0.003, g); // recessed plinth shadow
+  }
+  const ez0 = -D / 2 + inset, ez1 = D / 2 - inset - (info.front ? PT : 0);
+  for (const [on, sx] of [[info.left, -1], [info.right, 1]]) if (on) box(PT, ph, ez1 - ez0, pm, sx * (W / 2 - inset - PT / 2), ph / 2, (ez0 + ez1) / 2, g);
+  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  return g;
+}
+
+// Exposed wall-mounted bath mixer: two S-unions with round covers, horizontal body with the lever on top,
+// a flat spout reaching over the bath and the hose outlet underneath.
+function bathMixer(it, s) {
+  const g = new THREE.Group();
+  const W = s.w * MM, D = s.d * MM, H = s.h * MM;
+  const mm = metalMat(colourName(it));
+  const back = -D / 2, yc = H * 0.45, bodyZ = back + 0.065, bodyW = Math.min(W * 0.8, 0.2);
+  for (const sx of [-1, 1]) {
+    const x = sx * 0.075;
+    const rose = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.031, 0.018, 32), mm);
+    rose.rotation.x = Math.PI / 2; rose.position.set(x, yc, back + 0.009); g.add(rose);
+    const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.009, 0.05, 16), mm);
+    arm.rotation.x = Math.PI / 2; arm.position.set(x, yc, back + 0.04); g.add(arm);
+  }
+  const body = new THREE.Mesh(new RoundedBoxGeometry(bodyW, 0.05, 0.05, 3, 0.012), mm);
+  body.position.set(0, yc, bodyZ); g.add(body);
+  // lever: short stem then a flat paddle pointing forward
+  box(0.03, 0.04, 0.03, mm, 0.045, yc + 0.045, bodyZ, g);
+  const lev = new THREE.Mesh(new RoundedBoxGeometry(0.03, 0.01, 0.075, 2, 0.004), mm);
+  lev.position.set(0.045, yc + 0.068, bodyZ + 0.03); lev.rotation.x = -0.12; g.add(lev);
+  // spout: flat blade from the body to the front, slightly drooping at the outlet
+  const sl = Math.max(0.06, D / 2 - bodyZ - 0.005);
+  const sp = new THREE.Mesh(new RoundedBoxGeometry(0.05, 0.02, sl, 2, 0.006), mm);
+  sp.position.set(-0.02, yc - 0.015, bodyZ + 0.02 + sl / 2); g.add(sp);
+  // hose connection under the body
+  const hc = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.035, 16), mm);
+  hc.position.set(0.05, yc - 0.042, bodyZ); g.add(hc);
+  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  return g;
+}
+
 function bath(it, s, cfg, col, m) {
+  if (cfg.shape !== 'oval') return shapedBath(it, s, m);
   const g = new THREE.Group();
   const W = s.w * MM, D = s.d * MM, H = s.h * MM;
   const rim = 0.06;
@@ -1255,6 +1400,7 @@ export function buildItem(it) {
     case 'box': g = blockBox(it, s); break;
     case 'falsewall': g = falseWall(it, s, m); break;
     case 'walltap': g = wallTap(it, s, m); break;
+    case 'bathmixer': g = bathMixer(it, s); break;
     case 'showervalve': g = showerValve(it, s, m); break;
     case 'showerhead': g = showerHead(it, s, m); break;
     case 'towelholder': g = towelHolder(it, s, m); break;

@@ -67,7 +67,7 @@ export const CATS = [
   { id: 'mirror', label: 'Mirrors', kinds: ['mirror'] },
   { id: 'mirrorcab', label: 'Mirror cabinets', kinds: ['mirrorcab'] },
   { id: 'worktop', label: 'Worktops', kinds: ['worktop', 'console'] },
-  { id: 'taps', label: 'Taps & showers', kinds: ['walltap', 'tap', 'showervalve', 'showerhead', 'porterset', 'handshower', 'walloutlet', 'porter', 'showerrail'] },
+  { id: 'taps', label: 'Taps & showers', kinds: ['walltap', 'tap', 'bathmixer', 'showervalve', 'showerhead', 'porterset', 'handshower', 'walloutlet', 'porter', 'showerrail'] },
   { id: 'acc', label: 'Towel holders & accessories', kinds: ['towelholder', 'accessory'] },
   { id: 'shower', label: 'Shower glass & trays', kinds: ['wetpanel', 'glass', 'tray'] },
   { id: 'wc', label: 'WC, bath & rails', kinds: ['toilet', 'wc', 'bath', 'towelrail', 'radiator'] },
@@ -158,6 +158,49 @@ const VANQUISH = {
   })),
 };
 
+// Villeroy & Boch Architectura rectangular bath (acrylic, single-ended, waste + overflow at the foot end) with
+// the leg set U99740000. UK prices from heatandplumb.com (bath + legs). Panels and waste are sold separately and
+// show up in the parts list from the bath's own options.
+const HP_URL = 'https://www.heatandplumb.com/acatalog/villeroy-boch-architectura-single-ended-rectangular-acrylic-bath';
+const MB = 'https://www.megabad.com/en/villeroy-boch-alle-kollektionen-architectura-armaturen-a-';
+const ARCHITECTURA = [
+  {
+    id: 'vb-architectura-rectangular-bath', name: 'Villeroy & Boch Architectura Rectangular Bath', kind: 'bath', profile: 'architectura',
+    brand: 'Villeroy & Boch', range: 'Architectura', cat: 'baths', front: 'plain', drawers: 0, doors: 0, hinge: '', double: false, shape: 'rect',
+    thumb: 'data/img/vb/architectura-bath.webp', drawing: 'data/img/vb/architectura-bath-drawing.webp',
+    note: '5 mm acrylic, 480 mm deep inside with a sloping backrest; waste and overflow at the foot end. Supplied with the leg set (U99740000), installed rim height about 580 mm. Bath panels and the pop-up waste are sold separately — choose them below and they are added to the parts list.',
+    sizes: [
+      [1700, 700, 'UBA177ARA2V-01', 469.95],
+      [1700, 750, 'UBA170ARA2V-01', 469.95],
+      [1600, 700, 'UBA167ARA2V-01', 562.95],
+      [1800, 700, 'UBA180ARA2V-01', 582.95],
+    ].map(([w, d, sku, price]) => ({
+      w, d, h: 580,
+      variants: [{ sku: `${sku} + U99740000`, colour: 'White Alpin', price: `£${price}`, img: 'data/img/vb/architectura-bath.webp', url: HP_URL }],
+    })),
+    // parts-list extras, switched on by the bath options (see bathInfo in models3d.js)
+    extras: {
+      waste: { name: 'Villeroy & Boch Multiplex pop-up bath waste with overflow', sku: 'U90960461', colour: 'White/Chrome', price: '£181.95', url: HP_URL },
+      front: { name: 'Acrylic bath front panel (cut to length)', sku: '', colour: 'White gloss', price: '£49.99', guide: true },
+      end: { name: 'Acrylic bath end panel (cut to width)', sku: '', colour: 'White gloss', price: '£39.99', guide: true },
+    },
+  },
+  {
+    id: 'vb-architectura-bath-mixer', name: 'Villeroy & Boch Architectura single-lever bath mixer (wall-mounted)', kind: 'bathmixer',
+    brand: 'Villeroy & Boch', range: 'Architectura', cat: 'bathroom-mixer-taps', front: 'plain', drawers: 0, doors: 0, hinge: '', double: false, shape: 'rect',
+    thumb: 'data/img/vb/architectura-bath-mixer.webp',
+    note: 'Exposed bath/shower mixer on two S-unions (150 mm centres) with the hose outlet underneath; hang it 150–250 mm above the bath rim. Sizes are approximate.',
+    sizes: [{ w: 280, d: 190, h: 110, variants: [{ sku: 'TVT10300200061', colour: 'Chrome', price: '€129.99', img: 'data/img/vb/architectura-bath-mixer.webp', url: MB + '2187132.htm' }] }],
+  },
+  {
+    id: 'vb-architectura-concealed-mixer', name: 'Villeroy & Boch Architectura concealed single-lever mixer', kind: 'showervalve',
+    brand: 'Villeroy & Boch', range: 'Architectura', cat: 'bathroom-mixer-taps', front: 'plain', drawers: 0, doors: 0, hinge: '', double: false, shape: 'round',
+    thumb: 'data/img/vb/architectura-concealed-mixer.webp',
+    note: 'Round trim with a single lever for a concealed body (sold separately). For a bath, pair it with a wall spout or a hand shower set.',
+    sizes: [{ w: 170, d: 70, h: 170, variants: [{ sku: 'TVS10335200061', colour: 'Chrome', price: '€124.99', img: 'data/img/vb/architectura-concealed-mixer.webp', url: MB + '2187027.htm' }] }],
+  },
+];
+
 export let MODELS = [];
 export const byId = new Map();
 
@@ -166,7 +209,7 @@ export async function loadCatalog() {
   const [data, vb, hg] = await Promise.all([load('data/catalog.json'), load('data/catalog_vb.json'), load('data/catalog_hg.json')]);
   for (const m of data) { m.brand = 'Dansani'; m.range = 'Luna'; }
   for (const m of GENERIC) { m.brand = m.brand || (m.mtm ? 'Dansani' : 'Generic'); m.range = m.range || (m.mtm ? 'Luna' : ''); }
-  MODELS = [...GENERIC.filter((g) => g.mtm), ...data, ...vb, ...hg, MERLYN, VANQUISH, ...GENERIC.filter((g) => !g.mtm)];
+  MODELS = [...GENERIC.filter((g) => g.mtm), ...data, ...vb, ...hg, ...ARCHITECTURA, MERLYN, VANQUISH, ...GENERIC.filter((g) => !g.mtm)];
   for (const m of MODELS) if (m.kind === 'showerhead' && !m.generic) normaliseShowerHead(m);
   // Logis concealed basin mixers: listing gives overall height and no width; use the wall-plate size
   for (const m of MODELS) if (m.kind === 'walltap' && /logis/i.test(m.name)) for (const s of m.sizes) { s.w = /fine/i.test(m.name) ? 220 : 200; s.h = 80; }
@@ -214,6 +257,7 @@ export const BRANDS = [
   { id: 'dansani', label: 'Dansani Luna', test: (m) => m.brand === 'Dansani' },
   { id: 'collaro', label: 'V&B Collaro', test: (m) => m.brand === 'Villeroy & Boch' && m.range === 'Collaro' },
   { id: 'subway', label: 'V&B Subway 3.0', test: (m) => m.brand === 'Villeroy & Boch' && m.range === 'Subway 3.0' },
+  { id: 'architectura', label: 'V&B Architectura', test: (m) => m.brand === 'Villeroy & Boch' && m.range === 'Architectura' },
   { id: 'viclean', label: 'V&B ViClean shower toilets', test: (m) => m.brand === 'Villeroy & Boch' && m.range === 'ViClean' },
   { id: 'hansgrohe', label: 'hansgrohe', test: (m) => m.brand === 'hansgrohe' },
   { id: 'logis', label: 'hansgrohe Logis', test: (m) => m.brand === 'hansgrohe' && m.range === 'Logis' },
@@ -248,12 +292,13 @@ export function defaultElev(kind, h) {
     case 'accessory': return 1000;
     case 'tap': return 865;
     case 'showervalve': return 1000;
+    case 'bathmixer': return 760;
     case 'showerhead': return 2150;
     default: return 0;
   }
 }
 
-export const WALL_MOUNTED = new Set(['vanity', 'base', 'open', 'tall', 'wall', 'mirrorcab', 'mirror', 'shelf', 'toilet', 'wc', 'towelrail', 'radiator', 'worktop', 'console', 'glass', 'bath', 'tray', 'box', 'basin', 'falsewall', 'walltap', 'showervalve', 'showerhead', 'towelholder', 'handshower', 'showerrail', 'accessory', 'porterset', 'porter', 'walloutlet', 'wetpanel', 'niche']);
+export const WALL_MOUNTED = new Set(['vanity', 'base', 'open', 'tall', 'wall', 'mirrorcab', 'mirror', 'shelf', 'toilet', 'wc', 'towelrail', 'radiator', 'worktop', 'console', 'glass', 'bath', 'tray', 'box', 'basin', 'falsewall', 'walltap', 'bathmixer', 'showervalve', 'showerhead', 'towelholder', 'handshower', 'showerrail', 'accessory', 'porterset', 'porter', 'walloutlet', 'wetpanel', 'niche']);
 export const STACKS_ON = new Set(['basin', 'ctbasin', 'worktop', 'tap']);
 export const SUPPORTS = new Set(['vanity', 'base', 'open', 'worktop', 'console', 'falsewall', 'basin', 'ctbasin']);
 export const ABOVE_FLOOR_DASHED = new Set(['wall', 'mirrorcab', 'mirror', 'shelf']);

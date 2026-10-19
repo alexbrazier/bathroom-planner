@@ -403,7 +403,7 @@ export function rebuildItems() {
   const seen = new Set();
   for (const it of store.d.items) {
     seen.add(it.id);
-    const sig = JSON.stringify([it.model, it.size, it.variant, it.custom, it.cfg, it.niche, it.bespoke, store.d.room.wallColor, store.d.room.wallTile, it.model.includes('toilet') ? [it.x, it.y, it.rot, it.elev, boxingSig()] : 0, /basin/.test(it.model) ? hasTapOn(it) : 0, /wetroom-panel/.test(it.model) ? [it.x, it.y, it.rot, store.d.room.pts] : 0, /falsewall|boxing/.test(it.model) ? v3.lastNiche : 0, /showerhead|overhead/.test(it.model) ? [it.elev, store.d.room.height] : 0]);
+    const sig = JSON.stringify([it.model, it.size, it.variant, it.custom, it.cfg, it.niche, it.bespoke, store.d.room.wallColor, store.d.room.wallTile, it.model.includes('toilet') ? [it.x, it.y, it.rot, it.elev, boxingSig()] : 0, /basin/.test(it.model) ? hasTapOn(it) : 0, /wetroom-panel/.test(it.model) || modelOf(it)?.kind === 'bath' ? [it.x, it.y, it.rot, store.d.room.pts] : 0, /falsewall|boxing/.test(it.model) ? v3.lastNiche : 0, /showerhead|overhead/.test(it.model) ? [it.elev, store.d.room.height] : 0]);
     let g = itemMeshes.get(it.id);
     if (!g || itemSig.get(it.id) !== sig) {
       if (g) { itemGroup.remove(g); g.traverse((c) => c.geometry?.dispose()); }
