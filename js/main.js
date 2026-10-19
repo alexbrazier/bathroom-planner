@@ -4,7 +4,8 @@ import { shareUrl, sharedToken, resolveShared } from './share.js';
 import { exportGLB, exportOBJ } from './export3d.js';
 import { initPlan, draw, fit, zoom, setTool, drawKey, exportPNG, addModelAt, plan } from './plan2d.js';
 import { enterVR, vrSupported } from './vr.js';
-import { init3d, rebuildRoom, rebuildItems, updateSelection, onShow, resetCamera, eyeLevel, setCutaway, setCeiling, screenshot } from './view3d.js';
+import { init3d, rebuildRoom, rebuildItems, updateSelection, onShow, resetCamera, eyeLevel, setCutaway, setCeiling, setReflections, screenshot } from './view3d.js';
+import { reflectionsOn } from './mirrors.js';
 import { initLibrary, renderLibrary, renderProps, showBOM, rotateItem, deleteItem, duplicateItem, copyItem, pasteClip, hasClip, toast } from './ui.js';
 import { ridersOf, applyRiders } from './place.js';
 import { initOverlays } from './overlays.js';
@@ -176,6 +177,8 @@ async function main() {
   $('#bom').addEventListener('click', (e) => { if (e.target.matches('[data-close]') || e.target === $('#bom')) $('#bom').hidden = true; });
   $('#cutaway').onchange = (e) => setCutaway(e.target.checked);
   $('#showCeiling').onchange = (e) => setCeiling(e.target.checked);
+  $('#reflections').checked = reflectionsOn();
+  $('#reflections').onchange = (e) => setReflections(e.target.checked);
   $('#cam3dReset').onclick = resetCamera;
   $('#camEye').onclick = eyeLevel;
   vrSupported().then((ok) => { $('#enterVR').hidden = !ok; });

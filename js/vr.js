@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
 import { store, switchRoom, activeRoom } from './state.js';
 import { pointInPoly } from './geom.js';
+import { AVATAR_LAYER } from './mirrors.js';
 
 const MM = 0.001;
 const SNAP = Math.PI / 6;
@@ -12,7 +13,7 @@ let active = false;
 const dolly = new THREE.Group();   // carries the headset camera + controllers around the room
 const rig = { x: 0, z: 0, yaw: 0 };
 let saved = null, turnLatch = [false, false], roomLatch = [false, false];
-let startSpotFn = null, label = null, labelUntil = 0;
+let startSpotFn = null, label = null, labelUntil = 0, avatar = null;
 const ctrls = [];
 
 export async function vrSupported() {
@@ -50,11 +51,12 @@ export function initVR(v3, startSpot) {
   }
   v.vrMarker = marker;
   label = makeLabel(); scene.add(label);
+  avatar = makeAvatar(); scene.add(avatar);
 
   renderer.xr.addEventListener('sessionstart', () => {
     // inside the room: every wall and the ceiling on, no selection box, lighter shadows
     saved = { cutaway: v.cutaway, ceiling: v.ceiling, shadow: v.sun.shadow.mapSize.x, cam: v.camera.position.clone(), target: v.controls.target.clone(), fov: v.camera.fov };
-    active = true;
+    active = true; avatar.visible = true;
     dolly.add(v.camera);
     standAtStart();
     v.cutaway = false; v.ceiling = true;
@@ -62,7 +64,7 @@ export function initVR(v3, startSpot) {
     v.sun.shadow.mapSize.set(1024, 1024); v.sun.shadow.map?.dispose(); v.sun.shadow.map = null;
   });
   renderer.xr.addEventListener('sessionend', () => {
-    active = false;
+    active = false; avatar.visible = false;
     dolly.remove(v.camera);
     v.camera.quaternion.identity(); v.camera.scale.set(1, 1, 1);
     if (saved) {
@@ -130,6 +132,45 @@ function showRoomLabel() {
   label.visible = true; labelUntil = performance.now() + 4000;
 }
 
+// A simple figure that follows the headset. It lives on AVATAR_LAYER, which only mirror cameras render, so
+// you see yourself in mirrors without your own head blocking the view.
+function makeAvatar() {
+  const g = new THREE.Group();
+  const skin = new THREE.MeshStandardMaterial({ color: '#d9b49a', roughness: 0.7 });
+  const hairM = new THREE.MeshStandardMaterial({ color: '#3b2f28', roughness: 0.9 });
+  const shirt = new THREE.MeshStandardMaterial({ color: '#4f6d8a', roughness: 0.8 });
+  const head = new THREE.Group(); head.name = 'head';
+  const skull = new THREE.Mesh(new THREE.SphereGeometry(0.095, 24, 18), skin); skull.scale.set(0.88, 1.12, 1); head.add(skull);
+  const hair = new THREE.Mesh(new THREE.SphereGeometry(0.099, 24, 12, 0, Math.PI * 2, 0, Math.PI * 0.55), hairM); hair.scale.set(0.9, 1.1, 1.02); hair.position.set(0, 0.012, 0.008); head.add(hair);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.014, 0.035, 8), skin); nose.rotation.x = -Math.PI / 2; nose.position.set(0, -0.012, -0.1); head.add(nose);
+  for (const sx of [-1, 1]) { const eye = new THREE.Mesh(new THREE.SphereGeometry(0.009, 8, 6), MATS_DARK); eye.position.set(sx * 0.032, 0.012, -0.088); head.add(eye); }
+  g.add(head);
+  const body = new THREE.Group(); body.name = 'body';
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.05, 0.1, 12), skin); neck.position.y = -0.13; body.add(neck);
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.15, 0.36, 6, 16), shirt); torso.scale.set(1.2, 1, 0.65); torso.position.y = -0.46; body.add(torso);
+  for (const sx of [-1, 1]) {
+    const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.045, 0.42, 4, 10), shirt); arm.position.set(sx * 0.22, -0.48, 0.01); arm.rotation.z = sx * 0.08; body.add(arm);
+  }
+  g.add(body);
+  g.traverse((o) => o.layers.set(AVATAR_LAYER));
+  g.visible = false;
+  return g;
+}
+const MATS_DARK = new THREE.MeshBasicMaterial({ color: '#1d1f22' });
+const _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _f = new THREE.Vector3();
+function poseAvatar() {
+  const cam = v.renderer.xr.getCamera();
+  cam.matrixWorld.decompose(_p, _q, _f);
+  const head = avatar.getObjectByName('head'), body = avatar.getObjectByName('body');
+  head.position.copy(_p); head.quaternion.copy(_q);
+  // body follows the head's position and facing (yaw only)
+  _f.set(0, 0, -1).applyQuaternion(_q); _f.y = 0;
+  const yaw = _f.lengthSq() > 1e-6 ? Math.atan2(-_f.x, -_f.z) : 0;
+  body.position.copy(_p);
+  body.rotation.set(0, yaw, 0);
+  body.translateZ(0.06); // neck sits a little behind the eyes
+}
+
 function headWorld() {
   const cam = v.renderer.xr.getCamera();
   return new THREE.Vector3().setFromMatrixPosition(cam.matrixWorld);
@@ -173,6 +214,7 @@ export function vrTick() {
   if (aimed) v.vrMarker.position.set(aimed.x, 0.005, aimed.z);
 
   if (label.visible && performance.now() > labelUntil) label.visible = false;
+  poseAvatar();
 
   // snap turn on either thumbstick; A (right) / X (left) = next room
   const session = v.renderer.xr.getSession();

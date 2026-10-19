@@ -7,6 +7,7 @@ import { wallsOf, outerPts, polyBounds, toWorld, distToSeg, slopeOf, ceilingAt, 
 import { buildItem, boxGeo, mat, MATS, tileTexture, hasTapOn } from './models3d.js';
 import { placeItem, ridersOf, applyRiders } from './place.js';
 import { initVR, vrTick } from './vr.js';
+import { addReflections, disposeGroup as disposeItem, reflectionsOn, setReflections as setRefl } from './mirrors.js';
 
 const MM = 0.001;
 export const v3 = { ready: false };
@@ -53,6 +54,7 @@ export function init3d(container, { onDropModel }) {
     if (v3.ceilingMesh) v3.ceilingMesh.visible = on || v3.ceiling;
     if (on) selBox.visible = false;
     else { updateSelection(); resize(); updateCutaway(); requestRender(); }
+    rebuildItems(); // mirrors use smaller reflection textures in the headset
   };
   initVR(v3, standSpot);
 
@@ -426,6 +428,7 @@ function builtOutHidden(it, cam, H) {
   return side < -10 && cam.y < H * 8;
 }
 export function setCutaway(on) { v3.cutaway = on; updateCutaway(); requestRender(); }
+export function setReflections(on) { setRefl(on); rebuildItems(); }
 export function setCeiling(on) { v3.ceiling = on; updateCutaway(); requestRender(); }
 
 // ------------------------------------------------------------------ items
@@ -441,19 +444,20 @@ export function rebuildItems() {
   const seen = new Set();
   for (const it of store.d.items) {
     seen.add(it.id);
-    const sig = JSON.stringify([it.model, it.size, it.variant, it.custom, it.cfg, it.niche, it.bespoke, store.d.room.wallColor, store.d.room.wallTile, it.model.includes('toilet') ? [it.x, it.y, it.rot, it.elev, boxingSig()] : 0, /basin/.test(it.model) ? hasTapOn(it) : 0, /wetroom-panel/.test(it.model) || modelOf(it)?.kind === 'bath' ? [it.x, it.y, it.rot, store.d.room.pts] : 0, /falsewall|boxing/.test(it.model) ? v3.lastNiche : 0, /showerhead|overhead/.test(it.model) ? [it.elev, store.d.room.height] : 0]);
+    const sig = JSON.stringify([reflectionsOn(), !!v3.vr, it.model, it.size, it.variant, it.custom, it.cfg, it.niche, it.bespoke, store.d.room.wallColor, store.d.room.wallTile, it.model.includes('toilet') ? [it.x, it.y, it.rot, it.elev, boxingSig()] : 0, /basin/.test(it.model) ? hasTapOn(it) : 0, /wetroom-panel/.test(it.model) || modelOf(it)?.kind === 'bath' ? [it.x, it.y, it.rot, store.d.room.pts] : 0, /falsewall|boxing/.test(it.model) ? v3.lastNiche : 0, /showerhead|overhead/.test(it.model) ? [it.elev, store.d.room.height] : 0]);
     let g = itemMeshes.get(it.id);
     if (!g || itemSig.get(it.id) !== sig) {
-      if (g) { itemGroup.remove(g); g.traverse((c) => c.geometry?.dispose()); }
+      if (g) { itemGroup.remove(g); disposeItem(g); }
       g = buildItem(it);
       if (!g) continue;
+      addReflections(g, !!v3.vr);
       itemMeshes.set(it.id, g); itemSig.set(it.id, sig);
       itemGroup.add(g);
     }
     g.position.set(it.x * MM, it.elev * MM, it.y * MM);
     g.rotation.y = -it.rot * Math.PI / 180;
   }
-  for (const [id, g] of itemMeshes) if (!seen.has(id)) { itemGroup.remove(g); g.traverse((c) => c.geometry?.dispose()); itemMeshes.delete(id); itemSig.delete(id); }
+  for (const [id, g] of itemMeshes) if (!seen.has(id)) { itemGroup.remove(g); disposeItem(g); itemMeshes.delete(id); itemSig.delete(id); }
   updateCutaway();
   updateSelection();
   requestRender();
