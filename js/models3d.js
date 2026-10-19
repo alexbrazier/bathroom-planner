@@ -81,7 +81,7 @@ export function mat(hex, opts = {}) {
   return m;
 }
 export const MATS = {
-  get chrome() { return mat('#d7dadd', { metal: 1, roughness: 0.12 }); },
+  get chrome() { return mat('#dfe2e5', { metal: 0.85, roughness: 0.2 }); },
   get black() { return mat('#18181a', { roughness: 0.45 }); },
   get dark() { return mat('#2a2d31', { roughness: 0.7 }); },
   get white() { return mat('#f7f7f5', { gloss: true }); },
@@ -793,12 +793,26 @@ function showerValve(it, s, m) {
   const g = new THREE.Group();
   const W = s.w * MM, D = s.d * MM, H = s.h * MM;
   const mm = metalMat(colourName(it));
-  const plate = new THREE.Mesh(new RoundedBoxGeometry(W, H, 0.01, 3, Math.min(W, H) * 0.12), mm);
-  plate.position.set(0, H / 2, -D / 2 + 0.005); g.add(plate);
-  const dials = H > W * 1.5 ? [H * 0.27, H * 0.73] : [H / 2];
-  for (const y of dials) {
-    const dial = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.032, 0.045, 32), mm);
-    dial.rotation.x = Math.PI / 2; dial.position.set(0, y, -D / 2 + 0.032); g.add(dial);
+  const n = (m.name || '').toLowerCase();
+  // plate: round for "S"/round models, square for E/Q, rounded rectangle otherwise
+  const round = m.shape === 'round' && Math.abs(W - H) < 0.02;
+  const plate = round ? new THREE.Mesh(new THREE.CylinderGeometry(W / 2, W / 2, 0.01, 48), mm)
+    : new RoundedBoxGeometry(W, H, 0.01, 3, /\bq\b/.test(n) ? Math.min(W, H) * 0.22 : Math.min(W, H) * (/\be\b/.test(n) ? 0.04 : 0.12));
+  const pm = round ? plate : new THREE.Mesh(plate, mm);
+  if (round) pm.rotation.x = Math.PI / 2;
+  pm.position.set(0, H / 2, -D / 2 + 0.005); g.add(pm);
+  // controls: 1 per function/outlet (thermostat + on/off-diverter), at most 3
+  const fm = n.match(/(\d)\s*(?:functions?|consumers?|outlets?)/);
+  let k = fm ? Math.min(3, +fm[1]) : /diverter|shut-off/.test(n) ? 2 : 1;
+  if (H > W * 1.5) k = Math.max(k, 2);
+  const tall = H > W * 1.2, r = Math.min(0.03, (tall ? H : W) / (k * 3.2));
+  for (let i = 0; i < k; i++) {
+    const f = (i + 1) / (k + 1);
+    const x = tall || k === 1 ? 0 : (f - 0.5) * W * 0.95, y = tall ? H * (1 - f) : H / 2;
+    const dial = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 1.06, 0.045, 32), mm);
+    dial.rotation.x = Math.PI / 2; dial.position.set(x, y, -D / 2 + 0.032); g.add(dial);
+    const mark = new THREE.Mesh(new THREE.BoxGeometry(0.004, r * 0.8, 0.002), MATS.dark);
+    mark.position.set(x, y + r * 0.45, -D / 2 + 0.0555); g.add(mark);
   }
   g.traverse((o) => (o.castShadow = true));
   return g;

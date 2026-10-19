@@ -67,7 +67,7 @@ def kind_of(cat,name):
     if 'fixfit' in n and 'porter' in n: return 'porter'
     if re.search(r'fixfit|wall outlet|wall connection elbow|hose connection', n) and not re.search(r'spare|seal|o-ring', n): return 'walloutlet'
     if re.search(r'\bporter', n): return 'porter'
-    if re.search(r'spare|cartridge|basic set|ibox|basic body|hose|cover|connector|adapter|extension|seal|o-ring|aerator|installation|rough|mounting|repair|filter|cleaning|^set ', n): return None
+    if re.search(r'spare|cartridge|basic set|ibox|basic body|hose|cover|connector|adapter|extension|seal|o-ring|aerator|installation (?:box|set|kit|unit)|rough|mounting|repair|filter|cleaning|^set ', n): return None
     if re.search(r'towel ring|towel holder|towel bar|towel rail|towel hook|bath towel|hand towel|hook', n): return 'towelholder'
     if 'accessoir' in c or re.search(r'addstoris|wallstoris|logis universal', c): return 'accessory'
     if 'showerpipe' in n or 'showerpipe' in c: return 'showerrail'
