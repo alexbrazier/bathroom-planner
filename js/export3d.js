@@ -36,6 +36,7 @@ function exportScene({ ceiling = false } = {}) {
   const remove = [];
   root.traverse((o) => {
     if (o === v3.ceilingMesh || o.userData?.ceiling) { o.visible = ceiling; if (!ceiling) remove.push(o); return; }
+    if (o.userData?.hallway) { remove.push(o); return; } // view-only scenery behind doors
     o.visible = true;
     // additive LED glow planes don't translate to other renderers
     if (o.material?.blending === THREE.AdditiveBlending) remove.push(o);

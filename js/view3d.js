@@ -192,9 +192,11 @@ export const VIEWS = [
 ];
 const viewTex = new Map();
 let outside = null, outsideKey = '';
+// Obscure glass: real transmission with a high roughness, so whatever is behind it (the view outside, or the room
+// from outside) shows through heavily blurred and still shifts with parallax as you move.
 function frostedGlass() {
   const k = '__frostWin';
-  if (!viewTex.has(k)) viewTex.set(k, new THREE.MeshStandardMaterial({ color: '#eef3f6', emissive: '#d3dee6', emissiveIntensity: 0.45, roughness: 0.95, transparent: true, opacity: 0.93, side: THREE.DoubleSide }));
+  if (!viewTex.has(k)) viewTex.set(k, new THREE.MeshPhysicalMaterial({ color: '#ffffff', transmission: 1, roughness: 0.6, thickness: 0.006, ior: 1.5, metalness: 0, side: THREE.DoubleSide }));
   return viewTex.get(k);
 }
 export function outsideOf(room) {
@@ -228,8 +230,10 @@ function updateOutside() {
   outside.material.map = tex; outside.material.needsUpdate = true;
 }
 function showOutside(on) {
-  const hasWindow = store.d.openings.some((op) => op.type === 'window' && op.glass !== 'frosted');
+  const hasWindow = store.d.openings.some((op) => op.type === 'window');
   if (outside) outside.visible = on && hasWindow;
+  // hallways behind internal doors: only from inside, otherwise they'd stick out of the room in the overview
+  for (const h of v3.hallways || []) h.visible = on;
 }
 
 // ------------------------------------------------------------------ room
@@ -372,6 +376,8 @@ export function rebuildRoom() {
   Object.assign(v3.sun.shadow.camera, { left: -ext, right: ext, top: ext, bottom: -ext, near: 0.5, far: 15 });
   v3.sun.shadow.camera.updateProjectionMatrix();
   v3.ceilingLight.position.set(b.cx * MM, ceilingAt(room, b.cx, b.cy) * MM - 0.1, b.cy * MM);
+  v3.hallways = [];
+  roomGroup.traverse((o) => { if (o.isGroup && o.userData.hallway) { o.visible = false; v3.hallways.push(o); } });
   updateOutside();
   updateCutaway();
   requestRender();
@@ -421,15 +427,17 @@ function addOpening(g, w, o, room) {
     // casement sashes (2 if wide enough) with clear or frosted (obscure) glass and a lever handle each
     const panes = o.panes || (W > 0.75 ? 2 : 1);
     const iw = W - 2 * ft, ih = H - 2 * ft, pw = iw / panes, sf = 0.045, y0 = sill + ft;
-    const glassM = o.glass === 'frosted' ? frostedGlass() : MATS.glass;
+    // glass: 'clear', 'frosted' (obscure) or 'half' (obscure bottom half, clear top)
     for (let i = 0; i < panes; i++) {
       const cx = -iw / 2 + pw * (i + 0.5);
       mk(pw - 0.004, sf, 0.06, cx, y0 + sf / 2, 0, frameM);
       mk(pw - 0.004, sf, 0.06, cx, y0 + ih - sf / 2, 0, frameM);
       mk(sf, ih - 2 * sf, 0.06, cx - pw / 2 + sf / 2 + 0.002, y0 + ih / 2, 0, frameM);
       mk(sf, ih - 2 * sf, 0.06, cx + pw / 2 - sf / 2 - 0.002, y0 + ih / 2, 0, frameM);
-      const gl = new THREE.Mesh(new THREE.PlaneGeometry(pw - 2 * sf, ih - 2 * sf), glassM);
-      gl.position.set(cx, y0 + ih / 2, 0); fr.add(gl);
+      const gw = pw - 2 * sf, gh = ih - 2 * sf;
+      const pane = (h, y, m) => { const gl = new THREE.Mesh(new THREE.PlaneGeometry(gw, h), m); gl.position.set(cx, y, 0); fr.add(gl); };
+      if (o.glass === 'half') { pane(gh / 2, y0 + sf + gh / 4, frostedGlass()); pane(gh / 2, y0 + sf + gh * 0.75, MATS.glass); }
+      else pane(gh, y0 + ih / 2, o.glass === 'frosted' ? frostedGlass() : MATS.glass);
       // handle on the closing edge (towards the middle for a pair), room side
       const hx = panes === 1 ? cx + pw / 2 - sf / 2 : i < panes / 2 ? cx + pw / 2 - sf / 2 : cx - pw / 2 + sf / 2;
       const hy = y0 + Math.min(ih / 2, 0.55);
@@ -452,6 +460,23 @@ function addOpening(g, w, o, room) {
     const a = 0.45 * (hingeStart ? 1 : -1) * (inward ? -1 : 1);
     leaf.rotation.y = a;
     fr.add(leaf);
+    // what's beyond the door: a short hallway (default) instead of the outdoor view, unless it leads outside
+    if (o.to !== 'outside') {
+      const hw = W + 0.9, hd = 1.4, hh = Math.min(room.height * MM, 2.6);
+      const wallM = new THREE.MeshStandardMaterial({ color: '#ece8e1', roughness: 0.95, side: THREE.BackSide });
+      const ceilM = new THREE.MeshStandardMaterial({ color: '#f7f6f3', roughness: 0.95, side: THREE.BackSide });
+      const floorM = new THREE.MeshStandardMaterial({ color: '#b39572', roughness: 0.7, side: THREE.BackSide });
+      // box faces: +x, −x, +y (ceiling), −y (floor), +z, −z — back-face only, so the side facing the room is never drawn
+      const hall = new THREE.Mesh(new THREE.BoxGeometry(hw, hh, hd), [wallM, wallM, ceilM, floorM, wallM, wallM]);
+      hall.position.set(0, hh / 2, -T / 2 - hd / 2 - 0.001);
+      hall.receiveShadow = true;
+      hall.userData.hallway = true;
+      // skirting along the back wall
+      const sk = new THREE.Mesh(boxGeo(hw, 0.08, 0.015), mat('#f4f3ef'));
+      sk.position.set(0, 0.04, -T / 2 - hd + 0.008);
+      const hallG = new THREE.Group(); hallG.add(hall, sk); hallG.userData.hallway = true;
+      fr.add(hallG);
+    }
   }
   g.add(fr);
 }

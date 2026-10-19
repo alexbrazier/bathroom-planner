@@ -312,7 +312,7 @@ function drawOpening(ctx, op, walls, px) {
   for (const p of [p0, p1]) { ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - w.nx * th, p.y - w.ny * th); }
   ctx.stroke();
   if (op.type === 'window') {
-    if (op.glass === 'frosted') ctx.setLineDash([4 * px, 3 * px]); // obscure glass
+    if (op.glass === 'frosted' || op.glass === 'half') ctx.setLineDash([4 * px, 3 * px]); // obscure glass
     ctx.beginPath();
     for (const f of [0.3, 0.5, 0.7]) {
       ctx.moveTo(p0.x - w.nx * th * f, p0.y - w.ny * th * f); ctx.lineTo(p1.x - w.nx * th * f, p1.y - w.ny * th * f);

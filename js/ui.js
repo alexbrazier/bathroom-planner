@@ -511,11 +511,12 @@ function openingPanel(el, op) {
     ${num('Height', 'height', op.height)}
     ${op.type === 'window' ? num('Sill height', 'sill', op.sill) : ''}
     ${op.type === 'window' ? `
-      <div class="row"><label>Glass</label><select data-k="glass"><option value="clear" ${op.glass !== 'frosted' ? 'selected' : ''}>Clear</option><option value="frosted" ${op.glass === 'frosted' ? 'selected' : ''}>Frosted (obscure)</option></select></div>
+      <div class="row"><label>Glass</label><select data-k="glass">${[['clear', 'Clear'], ['half', 'Frosted bottom half'], ['frosted', 'Frosted (obscure)']].map(([v, l]) => `<option value="${v}" ${(op.glass || 'clear') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       <div class="row"><label>Opening sashes</label><select data-k="panes">${[[0, 'Auto'], [1, '1'], [2, '2'], [3, '3']].map(([v, l]) => `<option value="${v}" ${(op.panes || 0) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>` : ''}
     ${op.type === 'door' ? `
       <div class="row"><label>Hinge side</label><select data-k="hinge"><option value="left" ${op.hinge !== 'right' ? 'selected' : ''}>Left</option><option value="right" ${op.hinge === 'right' ? 'selected' : ''}>Right</option></select></div>
-      <div class="row"><label>Opens</label><select data-k="swing"><option value="in" ${op.swing !== 'out' ? 'selected' : ''}>Into room</option><option value="out" ${op.swing === 'out' ? 'selected' : ''}>Outwards</option></select></div>` : ''}
+      <div class="row"><label>Opens</label><select data-k="swing"><option value="in" ${op.swing !== 'out' ? 'selected' : ''}>Into room</option><option value="out" ${op.swing === 'out' ? 'selected' : ''}>Outwards</option></select></div>
+      <div class="row"><label>Leads to</label><select data-k="doorTo"><option value="hall" ${op.to !== 'outside' ? 'selected' : ''}>Hallway / landing</option><option value="outside" ${op.to === 'outside' ? 'selected' : ''}>Outside</option></select></div>` : ''}
     <div class="btns"><button data-act="del" class="danger">Delete</button><button data-act="back">← Room</button></div>`;
   const clampOff = () => { op.offset = Math.max(0, Math.min(w.len - op.width, op.offset)); };
   bind(el, {
@@ -525,6 +526,7 @@ function openingPanel(el, op) {
     height: (v) => mutate(() => { op.height = Math.max(200, +v); }, 'room'),
     sill: (v) => mutate(() => { op.sill = Math.max(0, +v); }, 'room'),
     glass: (v) => mutate(() => { op.glass = v; }, 'room'),
+    doorTo: (v) => mutate(() => { if (v === 'outside') op.to = 'outside'; else delete op.to; }, 'room'),
     panes: (v) => mutate(() => { if (+v) op.panes = +v; else delete op.panes; }, 'room'),
     hinge: (v) => mutate(() => { op.hinge = v; }, 'room'),
     swing: (v) => mutate(() => { op.swing = v; }, 'room'),
@@ -579,7 +581,7 @@ function roomPanel(el) {
       <div class="fld"><span>Turn view (°)</span><input type="number" data-k="outTurn" value="${o.turn}" step="15"></div>
     </div>
     ${o.view !== 'none' ? `<img class="view-thumb" src="data/views/${o.view}-thumb.jpg" alt="">` : ''}
-    <div class="note">A 360° photo seen through clear windows (frosted ones stay private). Shown from inside the room — try <b>Eye level</b> in 3D, or VR. Photos: Poly Haven, CC0.</div>`; })()}
+    <div class="note">A 360° photo seen through the windows — clear glass shows it sharp, frosted glass heavily blurred. Shown from inside the room — try <b>Eye level</b> in 3D, or VR. Photos: Poly Haven, CC0.</div>`; })()}
 
     <h4>Finishes</h4>
     <div class="row"><label>Wall paint</label><input type="color" data-k="wallColor" value="${r.wallColor}"></div>
