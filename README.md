@@ -18,11 +18,30 @@ copy and **File → Open project** to move it between machines or between localh
 
 ## Sharing
 
-**Share ▾** creates a link to the current room or the whole project. The design is compressed into the
-URL fragment (`#p=…`, see `js/share.js`), so nothing is stored on a server and the fragment never leaves
-the browser. Links are snapshots (~0.5–1.5 KB for typical rooms). Opening one shows the design
-view-only, with **Save a copy** (adds the rooms to your own project) or **Close**; the viewer's own saved
-project is never touched until they save a copy.
+**Share ▾** creates a link to the current room or the whole project. The design is compressed into a token
+(see `js/share.js`) and, when the short-link Worker is set up, stored there under an 8-character key
+(`#s=Xk3p9Qa2`). If the Worker can't be reached the link falls back to carrying the whole design in the URL
+fragment (`#p=…`, ~0.5–1.5 KB, nothing stored anywhere). Both kinds always open. Links are snapshots: opening
+one shows the design view-only, with **Save a copy** (adds the rooms to your own project) or **Close**.
+
+### Short-link Worker (`worker/`)
+
+A Cloudflare Worker with a KV namespace: `POST /` stores a token and returns its key (keys are a hash of the
+design, so the same design always gives the same link), `GET /<key>` returns it. Only origins listed in
+`ALLOWED_ORIGINS` (`worker/wrangler.toml`) can create links. Free tier: 100k reads / 1k new links a day.
+
+One-off setup:
+
+```bash
+cd worker
+npx wrangler login                          # browser sign-in
+npx wrangler kv namespace create SHARES     # paste the printed id into wrangler.toml
+npx wrangler deploy                         # prints https://bathroom-designer-share.<you>.workers.dev
+```
+
+Then set `SHORT_API_DEFAULT` in `js/share.js` to that URL and push (currently `https://bathroom-designer-share.aejbrazier.workers.dev`). Run `npx wrangler deploy` again after
+changing the Worker. Local testing: `npx wrangler dev --port 8787 --local` (simulated KV), and in the
+app's console `localStorage.setItem('bathroom-designer:shortApi', 'http://localhost:8787')`.
 
 ## Layout
 

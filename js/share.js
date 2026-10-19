@@ -1,6 +1,11 @@
-// Share links: the project is deflate-compressed and base64url-encoded into the URL fragment
-// (#p=…). Fragments are never sent to the server, so the design only lives in the link.
+// Share links: the project is deflate-compressed and base64url-encoded (a "p1.…" token).
+//  - short links (#s=<key>): the token is stored by the share Worker (worker/) under a key
+//  - long links  (#p=<token>): the token itself is in the URL fragment — used when the Worker can't be reached
 const PREFIX = 'p1.';
+// Short-link Worker. Set to '' to always make long links. For local testing with `wrangler dev`, run
+// localStorage.setItem('bathroom-designer:shortApi', 'http://localhost:8787') in the console.
+const SHORT_API_DEFAULT = 'https://bathroom-designer-share.aejbrazier.workers.dev';
+const shortApi = () => { try { return localStorage.getItem('bathroom-designer:shortApi') ?? SHORT_API_DEFAULT; } catch { return SHORT_API_DEFAULT; } };
 
 async function pipe(bytes, stream) {
   const out = new Response(new Blob([bytes]).stream().pipeThrough(stream));
@@ -35,13 +40,38 @@ export async function decodeProject(token) {
   return JSON.parse(new TextDecoder().decode(bytes));
 }
 
+// Returns { url, short } — short is false when it fell back to a long link.
 export async function shareUrl(project) {
+  const token = await encodeProject(project);
   const u = new URL(location.href);
-  u.hash = 'p=' + (await encodeProject(project));
-  return u.toString();
+  const api = shortApi();
+  if (api) {
+    try {
+      // text/plain keeps this a "simple" CORS request (no preflight)
+      const r = await fetch(api.replace(/\/$/, '') + '/', { method: 'POST', body: token, headers: { 'Content-Type': 'text/plain' }, signal: AbortSignal.timeout(6000) });
+      if (r.ok) {
+        const { key } = await r.json();
+        if (key) { u.hash = 's=' + key; return { url: u.toString(), short: true }; }
+      }
+    } catch (e) { console.warn('Short link failed, using a long link', e); }
+  }
+  u.hash = 'p=' + token;
+  return { url: u.toString(), short: false };
 }
 
+// The share link in the current URL, if any: { kind: 'p', token } or { kind: 's', key }.
 export function sharedToken() {
-  const m = location.hash.match(/^#p=(.+)$/);
-  return m ? m[1] : null;
+  const m = location.hash.match(/^#([ps])=(.+)$/);
+  if (!m) return null;
+  return m[1] === 'p' ? { kind: 'p', token: m[2] } : { kind: 's', key: m[2] };
+}
+
+// Fetch (for short links) and decode a shared project.
+export async function resolveShared(ref) {
+  if (ref.kind === 'p') return decodeProject(ref.token);
+  const api = shortApi() || SHORT_API_DEFAULT;
+  if (!api) throw new Error('Short links are not set up');
+  const r = await fetch(api.replace(/\/$/, '') + '/' + encodeURIComponent(ref.key), { signal: AbortSignal.timeout(10000) });
+  if (!r.ok) throw new Error(r.status === 404 ? 'That share link has expired or does not exist' : `Share server error ${r.status}`);
+  return decodeProject((await r.text()).trim());
 }

@@ -1,0 +1,15 @@
+# Short-link store for share links (Cloudflare Worker + KV).
+# Deploy: cd worker && npx wrangler deploy   (see README "Short share links")
+name = "bathroom-designer-share"
+main = "src/index.js"
+compatibility_date = "2025-06-01"
+
+[vars]
+# Pages allowed to create links (comma-separated origins). Reading a link works from anywhere.
+ALLOWED_ORIGINS = "https://alexbrazier.github.io,http://localhost:8138"
+# 0 = keep links forever; otherwise links expire this many days after they were first made.
+EXPIRE_DAYS = "0"
+
+[[kv_namespaces]]
+binding = "SHARES"
+id = "8f847a882723490cab9087d72bfac1ea"

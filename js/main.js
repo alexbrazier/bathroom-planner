@@ -1,6 +1,6 @@
 import { loadCatalog } from './catalog.js';
 import { store, on, load, undo, redo, select, itemById, newDesign, replaceDesign, checkpoint, commit, sizeOf, makeProject, asProject, loadProject, switchRoom, addRoom, renameRoom, deleteRoom, activeRoom, viewShared, leaveShared } from './state.js';
-import { shareUrl, sharedToken, decodeProject } from './share.js';
+import { shareUrl, sharedToken, resolveShared } from './share.js';
 import { exportGLB, exportOBJ } from './export3d.js';
 import { initPlan, draw, fit, zoom, setTool, drawKey, exportPNG, addModelAt, plan } from './plan2d.js';
 import { enterVR, vrSupported } from './vr.js';
@@ -18,7 +18,7 @@ async function main() {
   let sharedFailed = false;
   const tok = sharedToken();
   if (tok) {
-    try { viewShared(asProject(await decodeProject(tok))); } catch (e) { console.error(e); sharedFailed = true; }
+    try { viewShared(asProject(await resolveShared(tok))); } catch (e) { console.error(e); sharedFailed = e.message || true; }
   }
   if (!tok || sharedFailed) {
     if (!load()) loadProject(makeProject(TEMPLATES[0].make(), 'My project', 'Ensuite'));
@@ -49,7 +49,7 @@ async function main() {
   syncUndo();
   syncRooms();
   syncReadOnly();
-  if (sharedFailed) toast("That share link couldn't be opened — it may be incomplete");
+  if (sharedFailed) toast(typeof sharedFailed === 'string' && /expired|not exist|server|not set up/.test(sharedFailed) ? sharedFailed : "That share link couldn't be opened — it may be incomplete");
 
   // sharing
   const sm = $('#shareMenu');
@@ -61,11 +61,14 @@ async function main() {
     const whole = b.dataset.share === 'project';
     const room = activeRoom();
     const p = whole ? store.project : { version: 2, name: store.project.name, rooms: [room], active: room.id };
-    const url = await shareUrl(p);
+    $('#shareUrl').value = 'Making link…';
+    $('#shareDlg').hidden = false;
+    const { url, short } = await shareUrl(p);
     $('#shareUrl').value = url;
+    const kind = short ? 'short link (design saved on the share server)' : `long link, ${(url.length / 1024).toFixed(1)} KB — the design is inside the link`;
     $('#shareWhat').textContent = whole
-      ? `Whole project "${store.project.name}" — ${store.project.rooms.length} room${store.project.rooms.length > 1 ? 's' : ''} · link is ${(url.length / 1024).toFixed(1)} KB`
-      : `Room "${room.name}" from "${store.project.name}" · link is ${(url.length / 1024).toFixed(1)} KB`;
+      ? `Whole project "${store.project.name}" — ${store.project.rooms.length} room${store.project.rooms.length > 1 ? 's' : ''} · ${kind}`
+      : `Room "${room.name}" from "${store.project.name}" · ${kind}`;
     $('#shareDlg').hidden = false;
     $('#shareUrl').select();
     try { await navigator.clipboard.writeText(url); toast('Link copied'); } catch { /* user can press Copy */ }
@@ -78,7 +81,7 @@ async function main() {
   $('#sharedClose').onclick = () => { leaveShared(false); clearHash(); syncReadOnly(); fit(); resetCamera(); };
   window.addEventListener('hashchange', async () => {
     const t = sharedToken(); if (!t) return;
-    try { viewShared(asProject(await decodeProject(t))); fit(); resetCamera(); } catch { toast("That share link couldn't be opened"); }
+    try { viewShared(asProject(await resolveShared(t))); fit(); resetCamera(); } catch (e) { toast(e.message && !/JSON|Unexpected/.test(e.message) ? e.message : "That share link couldn't be opened"); }
   });
 
   // rooms
