@@ -5,6 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>Bathroom Designer</title>
+<link rel="icon" href="assets/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+<link rel="icon" type="image/png" sizes="48x48" href="assets/favicon-48.png">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#1f4747">
+<meta name="apple-mobile-web-app-title" content="Bathroom">
 <link rel="stylesheet" href="css/app.css">
 <script type="importmap">
 {
@@ -17,7 +24,8 @@
 </head>
 <body>
 <header id="topbar">
-  <div class="brand">Bathroom Designer</div>
+  <div class="bar-row" id="mainRow">
+  <div class="brand"><img src="assets/logo-64.png" alt="" width="28" height="28">Bathroom Designer</div>
   <div class="rooms">
     <span id="projectName" class="proj" title="Click to rename project"></span>
     <select id="roomSelect" title="Switch room"></select>
@@ -32,19 +40,7 @@
       </div>
     </div>
   </div>
-  <div class="seg" id="viewMode">
-    <button data-mode="2d" class="on">2D plan</button>
-    <button data-mode="split">Split</button>
-    <button data-mode="3d">3D</button>
-  </div>
-  <div class="tools">
-    <button id="toolSelect" class="on" title="Select / move (V)">Select</button>
-    <button id="toolMeasure" title="Measure distance (M)">Measure</button>
-    <button id="toolDraw" title="Draw room outline by clicking corners">Draw room</button>
-  </div>
   <div class="spacer"></div>
-  <button id="undoBtn" title="Undo (Ctrl+Z)">Undo</button>
-  <button id="redoBtn" title="Redo (Ctrl+Shift+Z)">Redo</button>
   <div class="menu">
     <button id="shareBtn" title="Share a link to this design">Share ▾</button>
     <div class="menu-pop" id="shareMenu">
@@ -68,6 +64,25 @@
       <label class="as-btn chk"><input type="checkbox" id="expCeiling"> Include ceiling in 3D export</label>
     </div>
   </div>
+  </div>
+  <div class="bar-row" id="toolRow">
+  <button id="libToggle" class="panel-toggle" title="Show / hide products">☰ <span class="lbl">Products</span></button>
+  <div class="seg" id="viewMode">
+    <button data-mode="2d" class="on">2D plan</button>
+    <button data-mode="split">Split</button>
+    <button data-mode="3d">3D</button>
+  </div>
+  <div class="tools">
+    <button id="toolSelect" class="on" title="Select and move fittings (V)">Select</button>
+    <button id="toolRoom" title="Edit walls, corners, doors and windows (E)">Edit room</button>
+    <button id="toolMeasure" title="Measure distance (M)">Measure</button>
+    <button id="toolDraw" title="Draw room outline by clicking corners">Draw room</button>
+  </div>
+  <div class="spacer"></div>
+  <button id="undoBtn" title="Undo (Ctrl+Z)">Undo</button>
+  <button id="redoBtn" title="Redo (Ctrl+Shift+Z)">Redo</button>
+  <button id="propsToggle" class="panel-toggle" title="Show / hide details">Details</button>
+  </div>
 </header>
 
 <div id="sharedBar" hidden>
@@ -77,6 +92,7 @@
 </div>
 
 <main id="layout" class="mode-2d">
+  <div id="drawerShade"></div>
   <aside id="library">
     <div class="lib-head">
       <input id="libSearch" type="search" placeholder="Search products…">
@@ -84,7 +100,7 @@
       <div id="libCats"></div>
     </div>
     <div id="libList"></div>
-    <div class="lib-foot">Drag onto the plan, or click to add. Data: Dansani Luna (dansani.co.uk, £); Villeroy &amp; Boch and hansgrohe (megabad.com, €).</div>
+    <div class="lib-foot">Tap or drag onto the plan to add. Data: Dansani Luna (dansani.co.uk, £); Villeroy &amp; Boch and hansgrohe (megabad.com, €).</div>
   </aside>
 
   <section id="views">

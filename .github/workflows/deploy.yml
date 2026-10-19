@@ -39,7 +39,7 @@ jobs:
         # Only the static app is published (no local server script, tools or editor config).
         run: |
           mkdir -p dist
-          cp -r index.html _headers css js data dist/
+          cp -r index.html manifest.webmanifest _headers assets css js data dist/
           echo "Publishing $(find dist -type f | wc -l) files ($(du -sh dist | cut -f1))"
 
       - name: Create Pages project (first run only)

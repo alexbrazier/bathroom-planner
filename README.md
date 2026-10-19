@@ -32,12 +32,14 @@ project is never touched until they save a copy.
 | `data/catalog.json` | Dansani Luna (dansani.co.uk, £) |
 | `data/catalog_vb.json`, `data/catalog_hg.json` | Villeroy & Boch, hansgrohe (megabad.com, €) |
 | `data/img/` | product thumbnails |
-| `tools/` | scripts used to build the catalogues |
+| `assets/`, `manifest.webmanifest` | favicons, app icons and header logo (generated) |
+| `design/icon-source.png` | original icon artwork — regenerate `assets/` with `python3 tools/make_icons.py` |
+| `tools/` | scripts used to build the catalogues and icons |
 | `_headers` | Cloudflare Pages headers (noindex, no-cache for JS/data); ignored by GitHub Pages |
 
 ## Deploy (GitHub Pages)
 
-`.github/workflows/github-pages.yml` publishes `index.html`, `css/`, `js/` and `data/` on every push to
+`.github/workflows/github-pages.yml` publishes `index.html`, `manifest.webmanifest`, `assets/`, `css/`, `js/` and `data/` on every push to
 `main` (or run it manually from the Actions tab).
 
 One-time setup: in the GitHub repo go to **Settings → Pages → Build and deployment → Source** and choose

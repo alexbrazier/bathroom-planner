@@ -2,7 +2,7 @@
 import { MODELS, CATS, catOf, byId, parsePrice, fmtPrice, currencyOf, BRANDS, colourPair, defaultElev, STACKS_ON, SUPPORTS } from './catalog.js';
 import { store, checkpoint, commit, select, modelOf, sizeOf, variantOf, cfgOf, priceOf, itemById, uid, defaultRoom, nicheOf } from './state.js';
 import { wallsOf, polyBounds, normAngle, snap } from './geom.js';
-import { addModelAt, clearances, splitWall, removeVertex, plan } from './plan2d.js';
+import { addModelAt, clearances, splitWall, removeVertex, plan, drawActions } from './plan2d.js';
 import { placeItem, ridersOf, applyRiders, findSupport } from './place.js';
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -365,11 +365,13 @@ function vertexPanel(el, i) {
   });
 }
 
-export function addOpening(type, wallIdx = 0) {
+// Add a door/window to a wall, centred on position t along it (mm from the wall's start) or mid-wall.
+export function addOpening(type, wallIdx = 0, t = null) {
   const w = wallsOf(store.d.room.pts)[wallIdx];
-  const width = type === 'door' ? 762 : 900;
+  const width = Math.min(type === 'door' ? 762 : 900, Math.max(300, w.len - 20));
+  const c = t ?? w.len / 2;
   mutate(() => {
-    const op = { id: uid(), type, wall: wallIdx, offset: Math.max(0, Math.round((w.len - width) / 2)), width, height: type === 'door' ? 1981 : 1050, sill: type === 'door' ? 0 : 900, hinge: 'left', swing: 'in' };
+    const op = { id: uid(), type, wall: wallIdx, offset: Math.max(0, Math.min(w.len - width, snap(c - width / 2, 10))), width, height: type === 'door' ? 1981 : 1050, sill: type === 'door' ? 0 : 900, hinge: 'left', swing: 'in' };
     store.d.openings.push(op);
     store.sel = { type: 'opening', id: op.id };
   }, 'room');
@@ -421,12 +423,12 @@ function roomPanel(el) {
 
     <h4>Walls (inside lengths)</h4>
     <div class="walls-list">${walls.map((w, i) => `<div class="row"><label>Wall ${i + 1}</label><input type="number" data-k="wall-${i}" value="${Math.round(w.len)}"><span class="unit">mm</span></div>`).join('')}</div>
-    <div class="note">Click a wall to select it; drag walls or corners to reshape. Double-click a wall to add a corner, or use <b>Draw room</b> for any shape.</div>
+    <div class="btns"><button data-act="editRoom" class="primary">Edit walls, doors &amp; windows</button><button data-act="drawRoom">Draw new outline</button></div>
+    <div class="note">In <b>Edit room</b> mode, click a wall to add a door or window where you clicked, split it, or type its length. Drag walls and corners to reshape. Fittings are locked while you edit the room.</div>
 
     <h4>Structure</h4>
     ${num('Ceiling height', 'height', r.height)}
     ${num('Wall thickness', 'thick', r.thickness)}
-    <div class="btns"><button data-act="door">Add door</button><button data-act="window">Add window</button></div>
 
     <h4>Finishes</h4>
     <div class="row"><label>Wall paint</label><input type="color" data-k="wallColor" value="${r.wallColor}"></div>
@@ -446,24 +448,18 @@ function roomPanel(el) {
     </div>
 
     <h4>Getting started</h4>
-    <div class="note">1. Set the room size above (all values in mm).<br>2. Drag Luna products from the left onto the plan — they snap flush to walls, corners and each other.<br>3. Drop a basin onto a vanity unit to sit it on top.<br>4. Select an item to change size, colour, or type exact clearances.<br>5. Switch to <b>Split</b> or <b>3D</b> to see it.</div>
+    <div class="note">1. Set the room size above (all values in mm).<br>2. Use <b>Edit room</b> to add doors and windows.<br>3. Drag products from the left onto the plan — they snap flush to walls, corners and each other.<br>4. Drop a basin onto a vanity unit to sit it on top.<br>5. Select an item to change size, colour, or type exact clearances.<br>6. Switch to <b>Split</b> or <b>3D</b> to see it.</div>
   `;
   const R = (fn) => mutate(fn, 'room');
   const h = {
     rw: () => {}, rl: () => {},
-    rect: () => {
-      const W = +$('#props [data-k=rw]').value, L = +$('#props [data-k=rl]').value;
-      if (W < 300 || L < 300) return;
-      R(() => { r.pts = [{ x: 0, y: 0 }, { x: W, y: 0 }, { x: W, y: L }, { x: 0, y: L }]; store.d.openings = store.d.openings.filter((o) => o.wall < 4).map((o) => ({ ...o, offset: Math.min(o.offset, Math.max(0, (o.wall % 2 ? L : W) - o.width)) })); });
-    },
-    lshape: () => {
-      const W = +$('#props [data-k=rw]').value, L = +$('#props [data-k=rl]').value;
-      R(() => { r.pts = [{ x: 0, y: 0 }, { x: W, y: 0 }, { x: W, y: Math.round(L * 0.55) }, { x: Math.round(W * 0.55), y: Math.round(L * 0.55) }, { x: Math.round(W * 0.55), y: L }, { x: 0, y: L }]; store.d.openings = []; });
-    },
+    // presets keep doors/windows that still fit (see applyRoomShape)
+    rect: () => { const W = +$('#props [data-k=rw]').value, L = +$('#props [data-k=rl]').value; if (W >= 300 && L >= 300) drawActions.preset('rect', W, L); },
+    lshape: () => { const W = +$('#props [data-k=rw]').value, L = +$('#props [data-k=rl]').value; if (W >= 300 && L >= 300) drawActions.preset('L', W, L); },
+    editRoom: () => document.getElementById('toolRoom')?.click(),
+    drawRoom: () => document.getElementById('toolDraw')?.click(),
     height: (v) => R(() => { r.height = Math.max(1500, +v); }),
     thick: (v) => R(() => { r.thickness = Math.max(20, +v); }),
-    door: () => addOpening('door', 0),
-    window: () => addOpening('window', 0),
     wallColor: (v) => R(() => { r.wallColor = v; }),
     wtOn: (v) => R(() => { r.wallTile.enabled = v; }),
     wtH: (v) => R(() => { r.wallTile.height = Math.max(0, +v); }),

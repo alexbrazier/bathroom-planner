@@ -137,7 +137,9 @@ export function resetCamera() {
   const b = polyBounds(store.d.room.pts);
   const cx = b.cx * MM, cz = b.cy * MM, size = Math.max(b.w, b.h) * MM;
   v3.controls.target.set(cx, 0.9, cz);
-  v3.camera.position.set(cx + size * 0.55, size * 1.25 + 1.2, cz + size * 1.15 + 0.8);
+  // pull back on tall/narrow views (phones in portrait) so the whole room fits
+  const k = Math.min(1.7, Math.max(1, 0.8 / (v3.camera.aspect || 1)));
+  v3.camera.position.set(cx + size * 0.55 * k, 0.9 + (size * 1.25 + 0.3) * k, cz + (size * 1.15 + 0.8) * k);
   v3.camera.fov = 50; v3.camera.updateProjectionMatrix();
   v3.controls.update(); updateCutaway(); requestRender();
 }
@@ -305,7 +307,7 @@ function updateCutaway() {
     const w = g.userData.wall;
     // camera outside this wall's inner face (on the −normal side) → hide it
     const side = (cam.x / MM - w.a.x) * w.nx + (cam.z / MM - w.a.y) * w.ny;
-    g.visible = !(v3.cutaway && side < -10 && cam.y < H * 4);
+    g.visible = !(v3.cutaway && side < -10 && cam.y < H * 8);
   }
   // Built-out walls / boxing hide together with the room wall they're built against.
   for (const it of store.d.items) {
@@ -326,7 +328,7 @@ function builtOutHidden(it, cam, H) {
   // free-standing: hide when the camera is behind its back face
   const r = it.rot * Math.PI / 180, nx = -Math.sin(r), ny = Math.cos(r); // local +y (front) in plan
   const side = (cam.x / MM - back.x) * nx + (cam.z / MM - back.y) * ny;
-  return side < -10 && cam.y < H * 4;
+  return side < -10 && cam.y < H * 8;
 }
 export function setCutaway(on) { v3.cutaway = on; updateCutaway(); requestRender(); }
 export function setCeiling(on) { v3.ceiling = on; updateCutaway(); requestRender(); }

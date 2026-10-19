@@ -71,10 +71,16 @@ export function zoom(f, sx = plan.w / 2, sy = plan.h / 2) {
   draw();
 }
 
+// Tools: 'select' (fittings), 'room' (walls, corners, doors, windows), 'measure', 'draw' (new room outline).
 export function setTool(t) {
   if (store.readOnly && t === 'draw') t = 'select';
-  plan.tool = t; plan.measure = null; plan.drawPts = t === 'draw' ? [] : null; plan.drawInput = '';
-  plan.canvas.style.cursor = t === 'select' ? 'default' : 'crosshair';
+  const prev = plan.tool;
+  plan.tool = t; plan.measure = null; plan.drawPts = t === 'draw' ? [] : null; plan.drawInput = ''; plan.drawCur = null;
+  plan.canvas.style.cursor = t === 'select' || t === 'room' ? 'default' : 'crosshair';
+  // leaving room editing drops room selections; entering it drops fitting selections
+  const s = store.sel;
+  if (s && ((t === 'select' && ['wall', 'vertex', 'opening'].includes(s.type)) || (t === 'room' && s.type === 'item'))) select(null);
+  if (prev !== t) emit('tool');
   hud(); draw();
 }
 
@@ -117,7 +123,9 @@ export function render(ctx, forExport) {
   // items (floor first, then by elevation)
   const layer = (it) => { const k = modelOf(it)?.kind; return k === 'falsewall' ? -1 : ['walltap', 'showervalve', 'showerhead', 'towelholder', 'tap', 'handshower', 'showerrail', 'accessory'].includes(k) ? 5000 : it.elev; };
   const items = [...d.items].sort((a, b) => layer(a) - layer(b));
+  if (plan.tool === 'room' && !forExport) ctx.globalAlpha = 0.35;
   for (const it of items) drawItem(ctx, it, px);
+  ctx.globalAlpha = 1;
 
   // walls
   const outer = outerPts(pts, d.room.thickness);
@@ -139,12 +147,12 @@ export function render(ctx, forExport) {
   // wall dimensions
   walls.forEach((w) => wallDim(ctx, w, d.room.thickness, px));
 
-  // vertices
+  // vertices (room mode shows them all)
   if (!forExport) {
     for (let i = 0; i < pts.length; i++) {
       const on = sel?.type === 'vertex' && sel.index === i;
       const hv = plan.hover?.type === 'vertex' && plan.hover.index === i;
-      if (!on && !hv && sel?.type !== 'wall') continue;
+      if (!on && !hv && plan.tool !== 'room') continue;
       const s = (on ? 6 : 4.5) * px;
       ctx.fillStyle = on ? ACCENT : '#fff'; ctx.strokeStyle = ACCENT; ctx.lineWidth = 1.5 * px;
       ctx.fillRect(pts[i].x - s, pts[i].y - s, 2 * s, 2 * s); ctx.strokeRect(pts[i].x - s, pts[i].y - s, 2 * s, 2 * s);
@@ -158,7 +166,18 @@ export function render(ctx, forExport) {
   }
   if (!forExport && sel?.type === 'opening') {
     const op = d.openings.find((o) => o.id === sel.id);
-    if (op) openingDims(ctx, op, walls, px);
+    if (op) { openingDims(ctx, op, walls, px); openingHandles(ctx, op, walls, px); }
+  }
+  // pinned dimensions
+  for (const dm of d.dims || []) {
+    dimLine(ctx, dm.a, dm.b, px, '#7a4fb5', `${Math.round(Math.hypot(dm.b.x - dm.a.x, dm.b.y - dm.a.y))}`);
+    if (!forExport && plan.tool === 'measure') {
+      const m = { x: (dm.a.x + dm.b.x) / 2, y: (dm.a.y + dm.b.y) / 2 };
+      const r = 7 * px;
+      ctx.fillStyle = '#fff'; ctx.strokeStyle = '#7a4fb5'; ctx.lineWidth = 1.2 * px;
+      ctx.beginPath(); ctx.arc(m.x + 22 * px, m.y - 12 * px, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      text(ctx, '×', m.x + 22 * px, m.y - 12.5 * px, px, { color: '#7a4fb5', size: 12, weight: 700 });
+    }
   }
 
   // guides
@@ -173,6 +192,7 @@ export function render(ctx, forExport) {
     dimLine(ctx, a, bb, px, '#e0457b', `${Math.round(Math.hypot(bb.x - a.x, bb.y - a.y))}`);
   }
   if (plan.drawPts) drawRoomPreview(ctx, px);
+  if (!forExport) plan.afterRender?.();
 }
 
 function drawGrid(ctx, px) {
@@ -280,6 +300,18 @@ function openingDims(ctx, op, walls, px) {
   dimLine(ctx, at(op.offset), at(op.offset + op.width), px, ACCENT, `${Math.round(op.width)}`);
   dimLine(ctx, at(op.offset + op.width), at(w.len), px, ACCENT, `${Math.round(w.len - op.offset - op.width)}`);
 }
+
+// Resize handles at both ends of the selected door/window.
+function openingEnds(op, walls) {
+  const w = walls[op.wall]; if (!w) return [];
+  return [op.offset, op.offset + op.width].map((t, i) => ({ end: i, x: w.a.x + w.ux * t + w.nx * 18 / plan.scale, y: w.a.y + w.uy * t + w.ny * 18 / plan.scale }));
+}
+function openingHandles(ctx, op, walls, px) {
+  if (plan.tool !== 'room' || store.readOnly) return;
+  ctx.fillStyle = '#fff'; ctx.strokeStyle = ACCENT; ctx.lineWidth = 1.5 * px;
+  for (const h of openingEnds(op, walls)) { ctx.beginPath(); ctx.arc(h.x, h.y, 6 * px, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+}
+export function screenOf(p) { return W2S(p); }
 
 function tint(hex, a) {
   const n = parseInt(hex.slice(1), 16);
@@ -514,21 +546,31 @@ function hitTest(w) {
   const px = 1 / plan.scale;
   const d = store.d;
   const sel = store.sel;
-  if (sel?.type === 'item') {
+  const room = plan.tool === 'room';
+  if (room) {
+    if (sel?.type === 'opening') {
+      const op = d.openings.find((o) => o.id === sel.id);
+      if (op) for (const h of openingEnds(op, wallsOf(d.room.pts))) if (Math.hypot(w.x - h.x, w.y - h.y) < 10 * px) return { type: 'opEnd', id: op.id, end: h.end };
+    }
+  }
+  if (!room && sel?.type === 'item') {
     const it = itemById(sel.id);
     if (it) { const h = rotHandlePos(it); if (Math.hypot(w.x - h.x, w.y - h.y) < 9 * px) return { type: 'rotate', id: it.id }; }
   }
-  for (let i = 0; i < d.room.pts.length; i++) {
-    const p = d.room.pts[i];
-    if (Math.hypot(w.x - p.x, w.y - p.y) < 8 * px) return { type: 'vertex', index: i };
-  }
   const walls = wallsOf(d.room.pts);
-  for (const op of d.openings) {
+  if (room) {
+    for (let i = 0; i < d.room.pts.length; i++) {
+      const p = d.room.pts[i];
+      if (Math.hypot(w.x - p.x, w.y - p.y) < 9 * px) return { type: 'vertex', index: i };
+    }
+  }
+  if (room) for (const op of d.openings) {
     const wl = walls[op.wall]; if (!wl) continue;
     const t = (w.x - wl.a.x) * wl.ux + (w.y - wl.a.y) * wl.uy;
     const n = (w.x - wl.a.x) * wl.nx + (w.y - wl.a.y) * wl.ny;
     if (t > op.offset && t < op.offset + op.width && n < 4 * px + 20 && n > -d.room.thickness - 4 * px) return { type: 'opening', id: op.id };
   }
+  if (!room) {
   const items = [...d.items].sort((a, b) => (b.elev + sizeOf(b).h) - (a.elev + sizeOf(a).h));
   // prefer the currently selected item if the point is inside it
   if (sel?.type === 'item') {
@@ -539,6 +581,8 @@ function hitTest(w) {
     const s = sizeOf(it);
     if (pointInPoly(w, itemCorners(it, s.w, Math.max(s.d, 40)))) return { type: 'item', id: it.id };
   }
+  return null;
+  }
   for (const wl of walls) {
     const n = (w.x - wl.a.x) * wl.nx + (w.y - wl.a.y) * wl.ny;
     const t = (w.x - wl.a.x) * wl.ux + (w.y - wl.a.y) * wl.uy;
@@ -547,15 +591,38 @@ function hitTest(w) {
   return null;
 }
 
+// Touch pointers currently down (for pinch-zoom / two-finger pan).
+const touches = new Map();
+function pinchInfo() {
+  const [a, b] = [...touches.values()];
+  return { d: Math.hypot(a.sx - b.sx, a.sy - b.sy) || 1, mx: (a.sx + b.sx) / 2, my: (a.sy + b.sy) / 2 };
+}
+
 function onDown(e) {
-  plan.canvas.setPointerCapture(e.pointerId);
+  try { plan.canvas.setPointerCapture(e.pointerId); } catch { /* synthetic or already-released pointer */ }
   const { sx, sy } = evPt(e);
   const w = S2W(sx, sy);
+  if (e.pointerType === 'touch') {
+    touches.set(e.pointerId, { sx, sy });
+    if (touches.size === 2) {
+      // a second finger turns the gesture into pinch-zoom, unless something is already being dragged
+      if (plan.drag?.moved) return;
+      const p = pinchInfo();
+      plan.drag = { type: 'pinch', d0: p.d, scale0: plan.scale, anchor: S2W(p.mx, p.my) };
+      plan.userMoved = true;
+      return;
+    }
+    if (touches.size > 2) return;
+  }
   if (e.button === 1 || e.button === 2 || plan.spaceDown) {
     plan.drag = { type: 'pan', sx, sy, ox: plan.ox, oy: plan.oy };
     return;
   }
   if (plan.tool === 'measure') {
+    // click the × on a pinned dimension to remove it
+    const px = 1 / plan.scale;
+    const pinned = (store.d.dims || []).find((dm) => Math.hypot(w.x - ((dm.a.x + dm.b.x) / 2 + 22 * px), w.y - ((dm.a.y + dm.b.y) / 2 - 12 * px)) < 9 * px);
+    if (pinned && !store.readOnly) { checkpoint(); store.d.dims = store.d.dims.filter((x) => x !== pinned); commit('room'); return; }
     const p = snapToFeatures(w);
     plan.measure = { a: p, b: p };
     plan.drag = { type: 'measure' };
@@ -566,7 +633,7 @@ function onDown(e) {
   const hit = hitTest(w);
   if (store.readOnly) {
     // view-only: allow selecting to read sizes/clearances, never dragging
-    if (hit && hit.type !== 'rotate') select(hit.type === 'item' || hit.type === 'opening' ? { type: hit.type, id: hit.id } : { type: hit.type, index: hit.index });
+    if (hit && hit.type !== 'rotate' && hit.type !== 'opEnd') select(hit.type === 'item' || hit.type === 'opening' ? { type: hit.type, id: hit.id } : { type: hit.type, index: hit.index });
     else if (!hit) select(null);
     plan.drag = { type: 'pan', sx, sy, ox: plan.ox, oy: plan.oy };
     return;
@@ -589,6 +656,11 @@ function onDown(e) {
     plan.drag = { type: 'item', it, start: JSON.stringify(d), off: { x: w.x - it.x, y: w.y - it.y }, riders: ridersOf(it), moved: false, sx, sy };
     return;
   }
+  if (hit.type === 'opEnd') {
+    const op = d.openings.find((o) => o.id === hit.id);
+    plan.drag = { type: 'opEnd', op, end: hit.end, start: JSON.stringify(d), o0: op.offset, w0: op.width, moved: false };
+    return;
+  }
   if (hit.type === 'vertex') {
     select({ type: 'vertex', index: hit.index });
     plan.drag = { type: 'vertex', index: hit.index, start: JSON.stringify(d), moved: false };
@@ -603,7 +675,9 @@ function onDown(e) {
     return;
   }
   if (hit.type === 'wall') {
-    select({ type: 'wall', index: hit.index });
+    const wl0 = wallsOf(d.room.pts)[hit.index];
+    const tClick = Math.max(0, Math.min(wl0.len, (w.x - wl0.a.x) * wl0.ux + (w.y - wl0.a.y) * wl0.uy));
+    select({ type: 'wall', index: hit.index, t: tClick });
     const pts = d.room.pts; const n = pts.length;
     plan.drag = { type: 'wall', index: hit.index, start: JSON.stringify(d), w0: w, a0: { ...pts[hit.index] }, b0: { ...pts[(hit.index + 1) % n] }, moved: false };
   }
@@ -611,16 +685,25 @@ function onDown(e) {
 
 function onMove(e) {
   const { sx, sy } = evPt(e);
+  if (e.pointerType === 'touch' && touches.has(e.pointerId)) touches.set(e.pointerId, { sx, sy });
+  if (plan.drag?.type === 'pinch') {
+    if (touches.size < 2) return;
+    const p = pinchInfo(), dg = plan.drag;
+    plan.scale = Math.min(3, Math.max(0.02, dg.scale0 * (p.d / dg.d0)));
+    plan.ox = p.mx - dg.anchor.x * plan.scale; plan.oy = p.my - dg.anchor.y * plan.scale;
+    draw();
+    return;
+  }
   const w = S2W(sx, sy);
   plan.cursor = w;
   const dg = plan.drag;
   if (plan.tool === 'draw') { plan.drawCur = drawSnap(w, e); hud(); draw(); return; }
   if (!dg) {
-    const h = plan.tool === 'select' ? hitTest(w) : null;
+    const h = plan.tool === 'select' || plan.tool === 'room' ? hitTest(w) : null;
     const key = JSON.stringify(h);
     if (key !== plan.hoverKey) {
       plan.hover = h; plan.hoverKey = key;
-      plan.canvas.style.cursor = !h ? (plan.tool === 'select' ? 'default' : 'crosshair') : h.type === 'rotate' ? 'grab' : h.type === 'wall' ? 'move' : h.type === 'vertex' ? 'crosshair' : 'move';
+      plan.canvas.style.cursor = !h ? (plan.tool === 'select' || plan.tool === 'room' ? 'default' : 'crosshair') : h.type === 'rotate' ? 'grab' : h.type === 'opEnd' ? 'ew-resize' : h.type === 'vertex' ? 'crosshair' : 'move';
       draw();
     }
     hud();
@@ -665,7 +748,18 @@ function onMove(e) {
       pts[dg.index] = p;
       emit('live-room'); draw(); break;
     }
+    case 'opEnd': {
+      dg.moved = true;
+      const op = dg.op;
+      const wl = wallsOf(d.room.pts)[op.wall];
+      const t = snap((w.x - wl.a.x) * wl.ux + (w.y - wl.a.y) * wl.uy, 10);
+      const MIN = 300;
+      if (dg.end === 0) { const right = dg.o0 + dg.w0; const o = Math.max(0, Math.min(right - MIN, t)); op.offset = o; op.width = right - o; }
+      else { op.width = Math.max(MIN, Math.min(wl.len - op.offset, t - op.offset)); }
+      emit('live-room'); draw(); hud(); break;
+    }
     case 'wall': {
+      if (!dg.moved && Math.hypot(w.x - dg.w0.x, w.y - dg.w0.y) < 4 / plan.scale) return;
       dg.moved = true;
       const pts = d.room.pts; const n = pts.length;
       const wl = wallsOf(JSON.parse(dg.start).room.pts)[dg.index];
@@ -687,13 +781,16 @@ function onMove(e) {
 }
 
 function onUp(e) {
+  if (e.pointerType === 'touch') touches.delete(e.pointerId);
+  if (e.type === 'pointercancel') touches.delete(e.pointerId);
   const dg = plan.drag;
+  if (dg?.type === 'pinch') { if (touches.size < 2) plan.drag = null; return; }
   if (!dg) return;
   plan.drag = null;
   plan.guides = [];
   hud();
   if (dg.type === 'measure') { plan.measure.done = true; draw(); return; }
-  if (['item', 'vertex', 'wall', 'opening', 'rotate'].includes(dg.type) && (dg.moved || dg.type === 'rotate')) {
+  if (['item', 'vertex', 'wall', 'opening', 'opEnd', 'rotate'].includes(dg.type) && (dg.moved || dg.type === 'rotate')) {
     store.undo.push(dg.start); store.redo.length = 0;
     commit(dg.type === 'item' || dg.type === 'rotate' ? 'items' : 'room');
   }
@@ -703,6 +800,7 @@ function onUp(e) {
 function onDbl(e) {
   if (store.readOnly) return;
   if (plan.tool === 'draw') { finishDraw(); return; }
+  if (plan.tool !== 'room') return;
   const { sx, sy } = evPt(e);
   const w = S2W(sx, sy);
   const hit = hitTest(w);
@@ -828,42 +926,95 @@ function drawClick(w, e) {
 export function drawKey(e) {
   if (plan.tool !== 'draw') return false;
   if (/^[0-9.]$/.test(e.key)) { plan.drawInput += e.key; plan.drawCur = drawSnap(plan.cursor || { x: 0, y: 0 }); draw(); hud(); return true; }
-  if (e.key === 'Backspace') { if (plan.drawInput) plan.drawInput = plan.drawInput.slice(0, -1); else plan.drawPts.pop(); draw(); hud(); return true; }
+  if (e.key === 'Backspace') { if (plan.drawInput) { plan.drawInput = plan.drawInput.slice(0, -1); plan.drawCur = drawSnap(plan.cursor || { x: 0, y: 0 }); } else plan.drawPts.pop(); draw(); hud(); return true; }
   if (e.key === 'Enter') {
-    if (plan.drawInput && plan.drawPts.length) { const p = drawSnap(plan.cursor || plan.drawPts[plan.drawPts.length - 1]); plan.drawPts.push({ x: Math.round(p.x), y: Math.round(p.y) }); plan.drawInput = ''; draw(); hud(); }
+    if (plan.drawInput && plan.drawPts.length) { const p = drawSnap(plan.cursor || plan.drawPts[plan.drawPts.length - 1]); plan.drawPts.push({ x: Math.round(p.x), y: Math.round(p.y) }); plan.drawInput = ''; plan.drawCur = p; draw(); hud(); }
     else finishDraw();
     return true;
   }
-  if (e.key === 'Escape') { setTool('select'); emit('tool'); return true; }
+  if (e.key === 'Escape') { setTool('room'); return true; }
   return false;
 }
-function finishDraw() {
-  const P = plan.drawPts;
-  if (!P || P.length < 3) { setTool('select'); emit('tool'); return; }
+// Re-attach doors/windows to the nearest wall of a new outline (keeps the ones that still fit).
+function remapOpenings(oldPts, newPts, openings, shift = { x: 0, y: 0 }) {
+  const oldW = wallsOf(oldPts), newW = wallsOf(newPts);
+  const kept = [];
+  for (const op of openings) {
+    const w = oldW[op.wall]; if (!w) continue;
+    const t = op.offset + op.width / 2;
+    const c = { x: w.a.x + w.ux * t - shift.x, y: w.a.y + w.uy * t - shift.y };
+    let best = null;
+    for (const nw of newW) {
+      const h = distToSeg(c, nw.a, nw.b);
+      if (nw.len >= op.width + 20 && (!best || h.d < best.d)) best = { nw, d: h.d, t: h.t * nw.len };
+    }
+    if (best && best.d < 250) kept.push({ ...op, wall: best.nw.i, offset: Math.round(Math.max(0, Math.min(best.nw.len - op.width, best.t - op.width / 2))) });
+  }
+  return kept;
+}
+
+// Replace the room outline: normalise to 0,0 and clockwise, move fittings with it, keep doors/windows.
+export function applyRoomShape(P, { shiftItems = true } = {}) {
+  const d = store.d;
   checkpoint();
-  // normalise: shift so min corner is at 0,0, keep clockwise orientation
   const b = polyBounds(P);
   let pts = P.map((p) => ({ x: Math.round(p.x - b.x0), y: Math.round(p.y - b.y0) }));
   if (signedArea(pts) < 0) pts.reverse();
-  const dx = b.x0, dy = b.y0;
-  for (const it of store.d.items) { it.x -= dx; it.y -= dy; }
-  store.d.room.pts = pts;
-  store.d.openings = [];
+  const shift = shiftItems ? { x: b.x0, y: b.y0 } : { x: 0, y: 0 };
+  if (shiftItems) for (const it of d.items) { it.x -= shift.x; it.y -= shift.y; }
+  if (shiftItems) for (const dm of d.dims || []) { dm.a.x -= shift.x; dm.a.y -= shift.y; dm.b.x -= shift.x; dm.b.y -= shift.y; }
+  const before = d.openings.length;
+  d.openings = remapOpenings(d.room.pts, pts, d.openings, shift);
+  d.room.pts = pts;
   store.sel = null;
-  setTool('select');
   commit('room');
-  emit('tool');
+  return before - d.openings.length; // how many doors/windows no longer fit
+}
+
+function finishDraw() {
+  const P = plan.drawPts;
+  if (!P || P.length < 3) { setTool('room'); return; }
+  const lost = applyRoomShape(P);
+  setTool('room');
   fit();
+  plan.onNotice?.(lost ? `Room updated — ${lost} door/window${lost > 1 ? 's no longer fitted and were' : ' no longer fitted and was'} removed` : 'Room updated');
+}
+export const drawActions = {
+  undo() { if (plan.drawInput) plan.drawInput = ''; else plan.drawPts?.pop(); hud(); draw(); },
+  finish() { if (plan.drawInput && plan.drawPts?.length) { const p = drawSnap(plan.cursor || plan.drawPts.at(-1)); plan.drawPts.push({ x: Math.round(p.x), y: Math.round(p.y) }); plan.drawInput = ''; } finishDraw(); },
+  cancel() { setTool('room'); },
+  preset(kind, W, L) {
+    W = Math.max(500, Math.round(W)); L = Math.max(500, Math.round(L));
+    const pts = kind === 'L'
+      ? [{ x: 0, y: 0 }, { x: W, y: 0 }, { x: W, y: Math.round(L * 0.55) }, { x: Math.round(W * 0.55), y: Math.round(L * 0.55) }, { x: Math.round(W * 0.55), y: L }, { x: 0, y: L }]
+      : [{ x: 0, y: 0 }, { x: W, y: 0 }, { x: W, y: L }, { x: 0, y: L }];
+    const lost = applyRoomShape(pts, { shiftItems: false });
+    setTool('room'); fit();
+    plan.onNotice?.(lost ? `Room updated — ${lost} door/window${lost > 1 ? 's no longer fitted and were' : ' no longer fitted and was'} removed` : 'Room updated');
+  },
+};
+// Pin the current measurement as a permanent dimension on the plan.
+export function pinMeasure() {
+  const m = plan.measure; if (!m?.a || !m.b || Math.hypot(m.b.x - m.a.x, m.b.y - m.a.y) < 1) return;
+  checkpoint();
+  store.d.dims = [...(store.d.dims || []), { id: uid(), a: { ...m.a }, b: { ...m.b } }];
+  plan.measure = null;
+  commit('room');
+}
+export function clearMeasure(all = false) {
+  plan.measure = null;
+  if (all && store.d.dims?.length) { checkpoint(); store.d.dims = []; commit('room'); }
+  draw(); hud();
 }
 
 function hud() {
   const el = plan.hud; if (!el) return;
   const c = plan.cursor;
   let s = '';
-  if (plan.tool === 'draw') s = plan.drawPts?.length ? 'Click corners · type a length then Enter for exact walls · click the first point or press Enter to finish · Esc cancels' : 'Click to place the first corner of the room';
-  else if (plan.tool === 'measure') s = plan.measure?.b ? `Distance: ${Math.round(Math.hypot(plan.measure.b.x - plan.measure.a.x, plan.measure.b.y - plan.measure.a.y))} mm  (Shift = no snapping)` : 'Drag to measure — snaps to corners and walls';
+  if (plan.tool === 'draw') s = '';
+  else if (plan.tool === 'measure') s = plan.measure?.b ? '' : 'Drag to measure — snaps to corners, fittings and walls (Shift = free)';
   else if (plan.drag?.type === 'item') s = 'Hold Alt to place freely without snapping';
-  else if (store.sel?.type === 'wall') s = 'Drag the wall to resize the room · double-click a wall to add a corner';
+  else if (plan.tool === 'room') s = store.sel ? 'Drag walls or corners to reshape · drag a door/window along its wall, or its round handles to resize · double-click a wall to add a corner' : 'Editing the room — click a wall to add a door or window · fittings are locked';
   else if (c) s = `x ${Math.round(c.x)}  y ${Math.round(c.y)} mm`;
   el.textContent = s;
 }

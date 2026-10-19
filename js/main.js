@@ -6,9 +6,11 @@ import { initPlan, draw, fit, zoom, setTool, drawKey, exportPNG, addModelAt, pla
 import { init3d, rebuildRoom, rebuildItems, updateSelection, onShow, resetCamera, eyeLevel, setCutaway, setCeiling, screenshot } from './view3d.js';
 import { initLibrary, renderProps, showBOM, rotateItem, deleteItem, duplicateItem, toast } from './ui.js';
 import { ridersOf, applyRiders } from './place.js';
+import { initOverlays } from './overlays.js';
 import { TEMPLATES } from './templates.js';
 
 const $ = (s) => document.querySelector(s);
+const isPhone = () => window.matchMedia('(max-width: 820px)').matches;
 
 async function main() {
   await loadCatalog();
@@ -22,6 +24,8 @@ async function main() {
   }
   initLibrary();
   initPlan($('#plan'), $('#hud2d'));
+  initOverlays($('#view2d'));
+  plan.onNotice = (msg) => toast(msg);
   init3d($('#view3d'), { onDropModel: (id, p, free) => addModelAt(id, p, free) });
   renderProps();
 
@@ -31,6 +35,7 @@ async function main() {
     if (kind === 'rooms') return;
     if (kind === 'live') { rebuildItems(); return; }
     if (kind === 'live-room') { rebuildRoom(); return; }
+    $('#propsToggle').classList.toggle('has-sel', !!store.sel);
     if (kind === 'select') { draw(); updateSelection(); renderProps(); return; }
     if (kind === 'tool') { syncTools(); return; }
     if (kind === 'room' || kind === 'load') rebuildRoom();
@@ -99,20 +104,62 @@ async function main() {
 
   // view mode
   const layout = $('#layout');
+  const modeKey = () => (isPhone() ? 'bathroom-designer:mode:phone' : 'bathroom-designer:mode');
   const setMode = (m) => {
     layout.className = 'mode-' + m;
     document.querySelectorAll('#viewMode button').forEach((b) => b.classList.toggle('on', b.dataset.mode === m));
-    try { localStorage.setItem('bathroom-designer:mode', m); } catch { /* ignore */ }
+    try { localStorage.setItem(modeKey(), m); } catch { /* ignore */ }
     requestAnimationFrame(() => { onShow(); draw(); });
   };
   $('#viewMode').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setMode(b.dataset.mode); });
-  let mode = 'split';
-  try { mode = localStorage.getItem('bathroom-designer:mode') || 'split'; } catch { /* ignore */ }
+  // phones default to 3D; desktop to split
+  let mode = isPhone() ? '3d' : 'split';
+  try { mode = localStorage.getItem(modeKey()) || mode; } catch { /* ignore */ }
   setMode(mode);
+  requestAnimationFrame(() => requestAnimationFrame(() => { fit(); resetCamera(); }));
+
+  // phones: menus are pinned (the bar rows scroll sideways), so open them just below their button
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('.menu > button');
+    if (b && isPhone()) document.documentElement.style.setProperty('--menu-top', Math.round(b.getBoundingClientRect().bottom + 4) + 'px');
+  }, true);
+
+  // side panels: collapsible columns on desktop, slide-in drawers on phones
+  const panels = { lib: $('#libToggle'), props: $('#propsToggle') };
+  try { for (const k of ['lib', 'props']) document.body.classList.toggle('hide-' + k, localStorage.getItem('bathroom-designer:hide-' + k) === '1'); } catch { /* ignore */ }
+  const panelOpen = (k) => (isPhone() ? document.body.classList.contains('show-' + k) : !document.body.classList.contains('hide-' + k));
+  const syncPanels = () => { for (const k in panels) panels[k].classList.toggle('on', panelOpen(k)); };
+  const togglePanel = (k, force) => {
+    if (isPhone()) {
+      const open = force ?? !document.body.classList.contains('show-' + k);
+      document.body.classList.remove('show-lib', 'show-props');
+      document.body.classList.toggle('show-' + k, open);
+    } else {
+      const hide = force === undefined ? !document.body.classList.contains('hide-' + k) : !force;
+      document.body.classList.toggle('hide-' + k, hide);
+      try { localStorage.setItem('bathroom-designer:hide-' + k, hide ? '1' : '0'); } catch { /* ignore */ }
+      requestAnimationFrame(() => { onShow(); draw(); });
+    }
+    syncPanels();
+  };
+  panels.lib.onclick = () => togglePanel('lib');
+  panels.props.onclick = () => togglePanel('props');
+  $('#drawerShade').onclick = () => { document.body.classList.remove('show-lib', 'show-props'); syncPanels(); };
+  // after adding a product on a phone, close the drawer so you can see it
+  $('#libList').addEventListener('click', (e) => { if (isPhone() && e.target.closest('.card')) setTimeout(() => togglePanel('lib', false), 150); });
+  window.matchMedia('(max-width: 820px)').addEventListener('change', () => { document.body.classList.remove('show-lib', 'show-props'); syncPanels(); requestAnimationFrame(() => { onShow(); draw(); }); });
+  syncPanels();
+  window.__togglePanel = togglePanel;
 
   // tools
-  const tools = { toolSelect: 'select', toolMeasure: 'measure', toolDraw: 'draw' };
-  for (const [id, t] of Object.entries(tools)) $('#' + id).addEventListener('click', () => { setTool(plan.tool === t && t !== 'select' ? 'select' : t); syncTools(); if (t === 'draw' && plan.tool === 'draw') toast('Click corners to draw the room · type lengths + Enter for exact walls'); });
+  const tools = { toolSelect: 'select', toolRoom: 'room', toolMeasure: 'measure', toolDraw: 'draw' };
+  // Edit room / Measure / Draw room work on the 2D plan: from 3D-only, switch to Split so you can see them.
+  const useTool = (t) => {
+    const next = plan.tool === t && t !== 'select' ? (t === 'draw' ? 'room' : 'select') : t;
+    if (next !== 'select' && layout.classList.contains('mode-3d')) setMode('split');
+    setTool(next); syncTools();
+  };
+  for (const [id, t] of Object.entries(tools)) $('#' + id).addEventListener('click', () => useTool(t));
   function syncTools() { for (const [id, t] of Object.entries(tools)) $('#' + id).classList.toggle('on', plan.tool === t); }
 
   $('#zoomFit').onclick = () => fit();
@@ -163,7 +210,7 @@ async function main() {
   // keyboard
   window.addEventListener('keydown', (e) => {
     if (e.target.closest('input, select, textarea')) return;
-    if (store.readOnly && !['Escape', 'f', 'F', 'v', 'V', 'm', 'M'].includes(e.key) && e.code !== 'Space') return;
+    if (store.readOnly && !['Escape', 'f', 'F', 'v', 'V', 'm', 'M', 'e', 'E'].includes(e.key) && e.code !== 'Space') return;
     if (e.code === 'Space') { plan.spaceDown = true; }
     if (drawKey(e)) { e.preventDefault(); return; }
     const mod = e.metaKey || e.ctrlKey;
@@ -171,9 +218,11 @@ async function main() {
     if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
     const it = store.sel?.type === 'item' ? itemById(store.sel.id) : null;
     if (mod && e.key.toLowerCase() === 'd' && it) { e.preventDefault(); duplicateItem(it); return; }
-    if (e.key === 'Escape') { if (plan.tool !== 'select') { setTool('select'); syncTools(); } else select(null); return; }
-    if (e.key === 'v' || e.key === 'V') { setTool('select'); syncTools(); }
-    if (e.key === 'm' || e.key === 'M') { setTool('measure'); syncTools(); }
+    if (e.key === 'Escape' && document.body.matches('.show-lib, .show-props')) { document.body.classList.remove('show-lib', 'show-props'); return; }
+    if (e.key === 'Escape') { if (store.sel) select(null); else if (plan.tool !== 'select') useTool('select'); return; }
+    if (e.key === 'v' || e.key === 'V') useTool('select');
+    if (e.key === 'e' || e.key === 'E') useTool(plan.tool === 'room' ? 'select' : 'room');
+    if (e.key === 'm' || e.key === 'M') useTool('measure');
     if (e.key === 'f' || e.key === 'F') fit();
     if (!it) {
       if ((e.key === 'Delete' || e.key === 'Backspace') && store.sel?.type === 'opening') {

@@ -25,7 +25,7 @@ jobs:
         # All paths in the app are relative, so it works under /<repo-name>/.
         run: |
           mkdir -p dist
-          cp -r index.html css js data dist/
+          cp -r index.html manifest.webmanifest assets css js data dist/
           echo "Publishing $(find dist -type f | wc -l) files ($(du -sh dist | cut -f1))"
 
       - uses: actions/configure-pages@v5
