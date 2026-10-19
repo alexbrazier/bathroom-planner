@@ -1189,7 +1189,7 @@ function handShower(it, s, m) {
   const hr = Math.max(0.045, Math.min(W / 2, 0.075));
   const head = new THREE.Mesh(new THREE.CylinderGeometry(hr, hr, 0.022, 32), mm); head.rotation.x = Math.PI / 2; head.position.set(0, 0.16 + hr * 0.8, 0.012); hs.add(head);
   const face = new THREE.Mesh(new THREE.CircleGeometry(hr - 0.006, 32), MATS.dark); face.position.set(0, 0.16 + hr * 0.8, 0.0235); hs.add(face);
-  hs.position.set(0, rail ? H * 0.62 : H * 0.18, -D / 2 + 0.06); hs.rotation.x = -0.35;
+  hs.position.set(0, rail ? H * 0.62 : H * 0.18, -D / 2 + 0.05); hs.rotation.x = 0.35; // top leans away from the wall
   g.add(hs);
   g.traverse((o) => (o.castShadow = true));
   return g;
@@ -1301,7 +1301,7 @@ function porterSet(it, s, m) {
   // hand shower parked in the holder, tilted away from the wall
   const hs = handShowerMesh(mm, W, square);
   const gripBottom = hy - 0.085;
-  hs.position.set(0, gripBottom, back + 0.05); hs.rotation.x = -0.3; g.add(hs);
+  hs.position.set(0, gripBottom, back + 0.045); hs.rotation.x = 0.3; g.add(hs); // top leans out of the holder, spray face points down into the room
   // hose: from the outlet, down in a loop, and up into the bottom of the handle
   const z0 = back + 0.04, sag = Math.min(0.45, 0.2 + H * 0.4);
   const curve = new THREE.CatmullRomCurve3([
@@ -1310,7 +1310,8 @@ function porterSet(it, s, m) {
     new THREE.Vector3(0.07, -sag, z0 + 0.06),
     new THREE.Vector3(0.09, -sag * 0.55, z0 + 0.05),
     new THREE.Vector3(0.05, gripBottom - 0.12, z0 + 0.02),
-    new THREE.Vector3(0, gripBottom - 0.01, back + 0.05),
+    new THREE.Vector3(0, gripBottom - 0.012, back + 0.041),
+    new THREE.Vector3(0, gripBottom + 0.008, back + 0.0475),
   ]);
   const hose = new THREE.Mesh(new THREE.TubeGeometry(curve, 64, 0.0065, 10), mm);
   g.add(hose);

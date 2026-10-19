@@ -1,7 +1,7 @@
 // Library panel, properties panel and parts list.
 import { MODELS, CATS, catOf, byId, parsePrice, fmtPrice, currencyOf, BRANDS, colourPair, defaultElev, STACKS_ON, SUPPORTS } from './catalog.js';
-import { store, checkpoint, commit, select, modelOf, sizeOf, variantOf, cfgOf, priceOf, itemById, uid, defaultRoom, nicheOf } from './state.js';
-import { wallsOf, polyBounds, normAngle, snap } from './geom.js';
+import { store, checkpoint, commit, select, modelOf, sizeOf, variantOf, cfgOf, priceOf, itemById, uid, defaultRoom, nicheOf, switchRoom } from './state.js';
+import { wallsOf, polyBounds, normAngle, snap, pointInPoly } from './geom.js';
 import { addModelAt, clearances, splitWall, removeVertex, plan, drawActions } from './plan2d.js';
 import { placeItem, ridersOf, applyRiders, findSupport } from './place.js';
 import { braceInfo, flushInfo, bathInfo } from './models3d.js';
@@ -27,7 +27,7 @@ export function initLibrary() {
     renderLibrary();
   });
   const bs = $('#libBrand');
-  bs.innerHTML = BRANDS.map((b) => `<option value="${b.id}">${b.label}</option>`).join('');
+  bs.innerHTML = `<option value="used">★ Used in this project</option>` + BRANDS.map((b) => `<option value="${b.id}">${b.label}</option>`).join('');
   try { libBrand = localStorage.getItem('bathroom-designer:brand') || 'all'; } catch { /* ignore */ }
   bs.value = libBrand;
   bs.addEventListener('change', () => { libBrand = bs.value; try { localStorage.setItem('bathroom-designer:brand', libBrand); } catch { /* ignore */ } renderLibrary(); });
@@ -77,9 +77,17 @@ function priceRange(m) {
   return fmtPrice(parsePrice(v.price), currencyOf(v.price));
 }
 
-function renderLibrary() {
+// How many of each product are placed across every room in the project.
+function usageCounts() {
+  const n = new Map();
+  for (const r of store.project?.rooms || [{ design: store.d }]) for (const it of r.design.items) n.set(it.model, (n.get(it.model) || 0) + 1);
+  return n;
+}
+
+export function renderLibrary() {
   const list = $('#libList');
-  let models = MODELS.filter(BRANDS.find((b) => b.id === libBrand)?.test || (() => true));
+  const used = usageCounts();
+  let models = libBrand === 'used' ? MODELS.filter((m) => used.has(m.id)) : MODELS.filter(BRANDS.find((b) => b.id === libBrand)?.test || (() => true));
   if (libQuery) {
     const words = libQuery.split(/\s+/).filter(Boolean);
     models = models.filter((m) => {
@@ -93,7 +101,8 @@ function renderLibrary() {
     const meta = m.custom && m.mtm ? 'Any size' : ws.length > 1 ? `W ${Math.min(...ws) / 10}–${Math.max(...ws) / 10} cm` : `${m.sizes[0].w / 10}×${m.sizes[0].d / 10}×${m.sizes[0].h / 10} cm`;
     const pr = priceRange(m);
     const img = m.thumb ? `<img src="${m.thumb}" loading="lazy" alt="" draggable="false">` : `<div class="ph">${icon(m.kind)}</div>`;
-    return `<div class="card" draggable="true" data-id="${m.id}" title="${esc(m.name)}">${img}<div class="nm">${esc(shortName(m.name))}</div><div class="meta">${meta}${pr ? ` · from ${pr}` : ''}</div></div>`;
+    const k = used.get(m.id);
+    return `<div class="card" draggable="true" data-id="${m.id}" title="${esc(m.name)}">${k ? `<span class="used" title="Used ${k}× in this project">×${k}</span>` : ''}${img}<div class="nm">${esc(shortName(m.name))}</div><div class="meta">${meta}${pr ? ` · from ${pr}` : ''}</div></div>`;
   };
   if (libCat === 'all') {
     let html = '';
@@ -101,7 +110,7 @@ function renderLibrary() {
       const ms = models.filter((m) => catOf(m) === c.id);
       if (ms.length) html += `<div class="lib-group">${c.label}</div>` + ms.map(card).join('');
     }
-    list.innerHTML = html || '<div class="note">No matches.</div>';
+    list.innerHTML = html || `<div class="note">${libBrand === 'used' && !used.size ? 'Nothing placed in this project yet.' : 'No matches.'}</div>`;
   } else list.innerHTML = models.map(card).join('') || '<div class="note">No matches in this category.</div>';
 }
 
@@ -221,9 +230,11 @@ function itemPanel(el, it) {
     <div class="btns">
       <button data-act="rotate">Rotate 90°</button>
       <button data-act="dup">Duplicate</button>
+      <button data-act="copy" title="⌘/Ctrl+C">Copy</button>
       <button data-act="del" class="danger">Delete</button>
     </div>
-    <div class="note" style="margin-top:10px">Keys: R rotate · Del delete · ⌘/Ctrl+D duplicate · arrows nudge 10 mm (Shift = 1 mm) · Alt-drag = no snapping</div>
+    ${(store.project?.rooms.length || 1) > 1 ? `<div class="row" style="margin-top:8px"><label>Copy to room</label><select data-k="copyTo"><option value="">Choose…</option>${store.project.rooms.filter((r) => r.id !== store.project.active).map((r) => `<option value="${r.id}">${esc(r.name)}</option>`).join('')}</select></div>` : ''}
+    <div class="note" style="margin-top:10px">Keys: R rotate · Del delete · ⌘/Ctrl+D duplicate · ⌘/Ctrl+C copy, ⌘/Ctrl+V paste (also into another room) · arrows nudge 10 mm (Shift = 1 mm) · Alt-drag = no snapping</div>
   `;
   const riders = () => ridersOf(it);
   const withRiders = (fn) => { const r = riders(); fn(); applyRiders(it, r); };
@@ -280,6 +291,8 @@ function itemPanel(el, it) {
     }),
     rotate: () => rotateItem(it),
     dup: () => duplicateItem(it),
+    copy: () => copyItem(it),
+    copyTo: (val) => { if (val) copyToRoom(it, val); },
     del: () => deleteItem(it),
   });
 }
@@ -369,6 +382,38 @@ export function deleteItem(it) {
     store.sel = null;
   });
 }
+// Clipboard for copying fittings between rooms: the item plus anything stacked on it (basin, tap, worktop).
+let clip = null;
+export function copyItem(it) {
+  const m = modelOf(it);
+  clip = { name: shortName(m?.name || 'item'), from: store.project?.active, items: [it, ...ridersOf(it).map((r) => r.o)].map((o) => JSON.parse(JSON.stringify(o))) };
+  toast(`Copied ${clip.name}${(store.project?.rooms.length || 1) > 1 ? ' — switch room and press ⌘/Ctrl+V to paste' : ''}`);
+  renderProps();
+}
+export const hasClip = () => !!clip;
+export function pasteClip() {
+  if (!clip) return;
+  const pts = store.d.room.pts;
+  const [main] = clip.items;
+  let dx = 0, dy = 0;
+  // same spot if it fits in this room (nudged if pasting back onto the original), else the middle of the room
+  if (!pointInPoly(main, pts)) { const b = polyBounds(pts); dx = b.cx - main.x; dy = b.cy - main.y; }
+  else if (store.d.items.some((o) => o.model === main.model && Math.hypot(o.x - main.x, o.y - main.y) < 5)) { dx = 100; dy = 100; }
+  mutate(() => {
+    const ids = [];
+    for (const o of clip.items) { const c = JSON.parse(JSON.stringify(o)); c.id = uid(); c.x += dx; c.y += dy; store.d.items.push(c); ids.push(c.id); }
+    const it = itemById(ids[0]);
+    if (dx || dy) { const r = ridersOf(it); placeItem(it, { x: it.x, y: it.y }); applyRiders(it, r); }
+    store.sel = { type: 'item', id: ids[0] };
+  });
+  toast(`Pasted ${clip.name}`);
+}
+export function copyToRoom(it, roomId) {
+  copyItem(it);
+  switchRoom(roomId);
+  pasteClip();
+}
+
 export function duplicateItem(it) {
   const s = sizeOf(it);
   const riders = ridersOf(it);
@@ -497,6 +542,8 @@ function roomPanel(el) {
     <div class="btns"><button data-act="editRoom" class="primary">Edit walls, doors &amp; windows</button><button data-act="drawRoom">Draw new outline</button></div>
     <div class="note">In <b>Edit room</b> mode, click a wall to add a door or window where you clicked, split it, or type its length. Drag walls and corners to reshape. Fittings are locked while you edit the room.</div>
 
+    ${clip ? `<div class="btns"><button data-act="paste" class="primary">Paste ${esc(clip.name)}</button></div>` : ''}
+
     <h4>Structure</h4>
     ${num('Ceiling height', 'height', r.height)}
     ${num('Wall thickness', 'thick', r.thickness)}
@@ -540,6 +587,7 @@ function roomPanel(el) {
     rect: () => { const W = +$('#props [data-k=rw]').value, L = +$('#props [data-k=rl]').value; if (W >= 300 && L >= 300) drawActions.preset('rect', W, L); },
     lshape: () => { const W = +$('#props [data-k=rw]').value, L = +$('#props [data-k=rl]').value; if (W >= 300 && L >= 300) drawActions.preset('L', W, L); },
     editRoom: () => document.getElementById('toolRoom')?.click(),
+    paste: () => pasteClip(),
     drawRoom: () => document.getElementById('toolDraw')?.click(),
     height: (v) => R(() => { r.height = Math.max(1500, +v); }),
     thick: (v) => R(() => { r.thickness = Math.max(20, +v); }),

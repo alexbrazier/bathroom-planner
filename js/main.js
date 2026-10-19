@@ -5,7 +5,7 @@ import { exportGLB, exportOBJ } from './export3d.js';
 import { initPlan, draw, fit, zoom, setTool, drawKey, exportPNG, addModelAt, plan } from './plan2d.js';
 import { enterVR, vrSupported } from './vr.js';
 import { init3d, rebuildRoom, rebuildItems, updateSelection, onShow, resetCamera, eyeLevel, setCutaway, setCeiling, screenshot } from './view3d.js';
-import { initLibrary, renderProps, showBOM, rotateItem, deleteItem, duplicateItem, toast } from './ui.js';
+import { initLibrary, renderLibrary, renderProps, showBOM, rotateItem, deleteItem, duplicateItem, copyItem, pasteClip, hasClip, toast } from './ui.js';
 import { ridersOf, applyRiders } from './place.js';
 import { initOverlays } from './overlays.js';
 import { TEMPLATES } from './templates.js';
@@ -40,6 +40,7 @@ async function main() {
     if (kind === 'select') { draw(); updateSelection(); renderProps(); return; }
     if (kind === 'tool') { syncTools(); return; }
     if (kind === 'room' || kind === 'load') rebuildRoom();
+    if (kind !== 'select' && kind !== 'tool') renderLibrary(); // "used in project" badges
     rebuildItems();
     draw();
     renderProps();
@@ -221,6 +222,8 @@ async function main() {
     if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
     const it = store.sel?.type === 'item' ? itemById(store.sel.id) : null;
     if (mod && e.key.toLowerCase() === 'd' && it) { e.preventDefault(); duplicateItem(it); return; }
+    if (mod && e.key.toLowerCase() === 'c' && it) { e.preventDefault(); copyItem(it); return; }
+    if (mod && e.key.toLowerCase() === 'v') { if (hasClip()) { e.preventDefault(); pasteClip(); } return; }
     if (e.key === 'Escape' && document.body.matches('.show-lib, .show-props')) { document.body.classList.remove('show-lib', 'show-props'); return; }
     if (e.key === 'Escape') { if (store.sel) select(null); else if (plan.tool !== 'select') useTool('select'); return; }
     if (e.key === 'v' || e.key === 'V') useTool('select');

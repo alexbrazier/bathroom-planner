@@ -212,3 +212,6 @@ body.readonly .ro-hide { display: none !important; }
 #views.mode-3d-hint { }
 
 .hud3d .vr-btn { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
+
+.card { position: relative; }
+.card .used { position: absolute; top: 4px; right: 4px; z-index: 1; background: var(--accent); color: #fff; font-size: 10px; font-weight: 600; line-height: 1; padding: 3px 5px; border-radius: 8px; }
