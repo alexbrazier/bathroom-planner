@@ -3,6 +3,7 @@ import { store, on, load, undo, redo, select, itemById, newDesign, replaceDesign
 import { shareUrl, sharedToken, decodeProject } from './share.js';
 import { exportGLB, exportOBJ } from './export3d.js';
 import { initPlan, draw, fit, zoom, setTool, drawKey, exportPNG, addModelAt, plan } from './plan2d.js';
+import { enterVR, vrSupported } from './vr.js';
 import { init3d, rebuildRoom, rebuildItems, updateSelection, onShow, resetCamera, eyeLevel, setCutaway, setCeiling, screenshot } from './view3d.js';
 import { initLibrary, renderProps, showBOM, rotateItem, deleteItem, duplicateItem, toast } from './ui.js';
 import { ridersOf, applyRiders } from './place.js';
@@ -173,6 +174,8 @@ async function main() {
   $('#showCeiling').onchange = (e) => setCeiling(e.target.checked);
   $('#cam3dReset').onclick = resetCamera;
   $('#camEye').onclick = eyeLevel;
+  vrSupported().then((ok) => { $('#enterVR').hidden = !ok; });
+  $('#enterVR').onclick = () => enterVR().catch((err) => toast(`Couldn't start VR: ${err.message || err}`));
 
   // file menu
   const fm = $('#fileMenu');

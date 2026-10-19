@@ -1,6 +1,6 @@
 // 2D plan editor on a <canvas>. World units: mm.
 import { store, emit, checkpoint, commit, select, sizeOf, modelOf, coloursOf, cfgOf, itemById, makeItem, uid, nicheOf } from './state.js';
-import { wallsOf, outerPts, distToSeg, pointInPoly, itemCorners, toLocal, rayToWalls, polyBounds, snap, rad, deg, normAngle, signedArea } from './geom.js';
+import { slopeOf, clipHalf, wallsOf, outerPts, distToSeg, pointInPoly, itemCorners, toLocal, rayToWalls, polyBounds, snap, rad, deg, normAngle, signedArea } from './geom.js';
 import { ABOVE_FLOOR_DASHED, byId, STACKS_ON } from './catalog.js';
 import { placeItem, ridersOf, applyRiders, nearestWall } from './place.js';
 import { braceInfo, flushInfo, bathInfo } from './models3d.js';
@@ -121,6 +121,18 @@ export function render(ctx, forExport) {
   }
   ctx.restore();
 
+  // sloped ceiling: shade the low part of the room
+  const slope = slopeOf(d.room);
+  if (slope) {
+    const zone = clipHalf(pts, slope.w.a, -slope.w.nx, -slope.w.ny, -slope.run);
+    if (zone.length > 2) {
+      const g = ctx.createLinearGradient(slope.w.a.x, slope.w.a.y, slope.w.a.x + slope.w.nx * slope.run, slope.w.a.y + slope.w.ny * slope.run);
+      g.addColorStop(0, 'rgba(120,110,95,0.20)'); g.addColorStop(1, 'rgba(120,110,95,0.02)');
+      ctx.beginPath(); zone.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); ctx.closePath();
+      ctx.fillStyle = g; ctx.fill();
+    }
+  }
+
   // items (floor first, then by elevation)
   const layer = (it) => { const k = modelOf(it)?.kind; return k === 'falsewall' ? -1 : ['walltap', 'showervalve', 'showerhead', 'towelholder', 'tap', 'handshower', 'showerrail', 'accessory', 'porterset', 'porter', 'walloutlet'].includes(k) ? 5000 : it.elev; };
   const items = [...d.items].sort((a, b) => layer(a) - layer(b));
@@ -128,6 +140,7 @@ export function render(ctx, forExport) {
   const inWall = (it) => modelOf(it)?.kind === 'niche' || modelOf(it)?.recessed;
   for (const it of items) if (!inWall(it)) drawItem(ctx, it, px);
   ctx.globalAlpha = 1;
+  if (slope) drawSlopeLines(ctx, d.room, slope, px);
 
   // walls
   const outer = outerPts(pts, d.room.thickness);
@@ -225,6 +238,29 @@ function text(ctx, str, x, y, px, opts = {}) {
   }
   ctx.fillStyle = opts.color || DIM;
   ctx.fillText(str, 0, 0);
+  ctx.restore();
+}
+
+// Dashed lines across the room where the sloped ceiling reaches full height and 2000 mm headroom.
+function drawSlopeLines(ctx, room, sl, px) {
+  const { w, low, k } = sl;
+  const b = polyBounds(room.pts), far = Math.hypot(b.w, b.h) * 2;
+  const lines = [[sl.run, `${room.height} ceiling`, 'rgba(110,98,80,0.75)']];
+  if (low < 2000 && room.height > 2000) lines.push([(2000 - low) / k, '2000 headroom', 'rgba(200,110,40,0.85)']);
+  lines.push([0, `${Math.round(low)} at wall`, null]);
+  ctx.save();
+  ctx.beginPath(); room.pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); ctx.closePath(); ctx.clip();
+  const ang = readableAngle(Math.atan2(w.uy, w.ux));
+  for (const [dd, label, col] of lines) {
+    const cx = (w.a.x + w.b.x) / 2 + w.nx * dd, cy = (w.a.y + w.b.y) / 2 + w.ny * dd;
+    if (col) {
+      ctx.strokeStyle = col; ctx.lineWidth = 1.5 * px; ctx.setLineDash([10 * px, 6 * px]);
+      ctx.beginPath(); ctx.moveTo(cx - w.ux * far, cy - w.uy * far); ctx.lineTo(cx + w.ux * far, cy + w.uy * far); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    const off = col ? -12 * px : 14 * px;
+    text(ctx, label, cx + w.nx * off + w.ux * (w.len * 0.3), cy + w.ny * off + w.uy * (w.len * 0.3), px, { size: 10, color: col || 'rgba(110,98,80,0.9)', angle: ang });
+  }
   ctx.restore();
 }
 
@@ -433,12 +469,13 @@ function drawItem(ctx, it, px) {
       ctx.beginPath(); ctx.arc(0, 0, 45, 0, Math.PI * 2); ctx.stroke();
       break;
     }
-    case 'wetpanel': {
+    case 'wetpanel': case 'bathscreen': {
       const flip = it.cfg?.channel === 'end' ? -1 : 1;
       ctx.setLineDash([]);
       ctx.strokeStyle = '#5f8fb3'; ctx.lineWidth = Math.max(3 * px, 8);
       ctx.beginPath(); ctx.moveTo(-hw, 0); ctx.lineTo(hw, 0); ctx.stroke();
       ctx.fillStyle = '#8c939b'; ctx.fillRect(-flip * hw - (flip > 0 ? 0 : 20), -11, 20, 22);
+      if (m.kind === 'bathscreen') break;
       const b = braceInfo(it);
       ctx.strokeStyle = b.fits ? '#8c939b' : '#d0602a'; ctx.lineWidth = 1.5 * px; ctx.setLineDash([6 * px, 4 * px]);
       ctx.beginPath(); ctx.moveTo(b.fx, 0); ctx.lineTo(b.fx, (b.side === 'front' ? 1 : -1) * b.len); ctx.stroke(); ctx.setLineDash([]);
@@ -511,7 +548,7 @@ function drawItem(ctx, it, px) {
   }
   ctx.setLineDash([]);
   // label
-  if (w * plan.scale > 50 && !['glass', 'mirror', 'walltap', 'showervalve', 'showerhead', 'falsewall', 'niche', 'wetpanel', 'towelholder', 'tap', 'handshower', 'showerrail', 'accessory', 'porterset', 'porter', 'walloutlet'].includes(m.kind)) {
+  if (w * plan.scale > 50 && !['glass', 'mirror', 'walltap', 'showervalve', 'showerhead', 'falsewall', 'niche', 'wetpanel', 'bathscreen', 'towelholder', 'tap', 'handshower', 'showerrail', 'accessory', 'porterset', 'porter', 'walloutlet'].includes(m.kind)) {
     const sku = m.generic ? '' : it.custom ? 'MTM' : (m.sizes[it.size]?.variants[0]?.sku || '').split('-')[0];
     const lbl = `${sku ? sku + ' · ' : ''}${Math.round(w)}`;
     if (!(m.kind === 'vanity' && hasRider(it))) text(ctx, lbl, 0, m.kind === 'basin' ? hd - 25 : 0, px, { size: 10, color: '#3d444e', angle: readableAngle(rad(it.rot)) - rad(it.rot) });

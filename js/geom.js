@@ -113,3 +113,35 @@ export function polyBounds(pts) {
 }
 
 export function normAngle(a) { a %= 360; if (a < 0) a += 360; return a; }
+
+// Sloped ceiling (loft / under the eaves): room.slope = { wall, low, run } — the ceiling is `low` mm high at the
+// inner face of wall `wall` and rises in a straight line to the full room height `run` mm into the room, flat
+// beyond that. Returns null when there is no (valid) slope.
+export function slopeOf(room) {
+  const s = room?.slope;
+  if (!s || !s.on) return null;
+  const walls = wallsOf(room.pts);
+  const w = walls[s.wall];
+  if (!w) return null;
+  const low = Math.max(300, Math.min(room.height, s.low ?? 1200));
+  const run = Math.max(100, s.run ?? 1500);
+  return { w, low, run, k: (room.height - low) / run };
+}
+// Ceiling height (mm) at plan point (x, y).
+export function ceilingAt(room, x, y) {
+  const s = slopeOf(room);
+  if (!s) return room.height;
+  const d = (x - s.w.a.x) * s.w.nx + (y - s.w.a.y) * s.w.ny;
+  return Math.min(room.height, s.low + s.k * d);
+}
+// Clip a polygon to the half-plane where (p - a)·n >= c (Sutherland–Hodgman).
+export function clipHalf(pts, a, nx, ny, c) {
+  const f = (p) => (p.x - a.x) * nx + (p.y - a.y) * ny - c;
+  const out = [];
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i], q = pts[(i + 1) % pts.length], fp = f(p), fq = f(q);
+    if (fp >= 0) out.push(p);
+    if ((fp >= 0) !== (fq >= 0)) { const t = fp / (fp - fq); out.push({ x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t }); }
+  }
+  return out;
+}

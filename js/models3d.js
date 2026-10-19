@@ -462,6 +462,7 @@ function worktop(it, s, cfg, col, m) {
 }
 
 function mirror(it, s, cfg, col, m) {
+  if (m.led === 'border') return ledMirror(it, s, m);
   const g = new THREE.Group();
   const W = s.w * MM, H = s.h * MM, D = Math.max(0.02, s.d * MM);
   const sh = new THREE.Shape();
@@ -480,6 +481,40 @@ function mirror(it, s, cfg, col, m) {
     glow.position.z = -D / 2 + 0.001; g.add(glow);
   }
   if (/glass shelf/i.test(m.name)) box(W, 0.008, 0.1, MATS.glass, 0, 0.004, D / 2 + 0.05, g);
+  return g;
+}
+
+// LED mirror (HiB Vega style): 5 mm glass on a smaller back box, a 20 mm frosted LED border inset from the edge,
+// ambient glow behind, touch switch bottom right and a shaver socket on the side of the box.
+function ledMirror(it, s, m) {
+  const g = new THREE.Group();
+  const W = s.w * MM, H = s.h * MM, D = Math.max(0.03, s.d * MM), GT = 0.005, r = 0.006;
+  const bw = W - 0.07, bh = H - 0.07, bd = D - GT;
+  box(bw, bh, bd, MATS.dark, 0, H / 2, -D / 2 + bd / 2, g);
+  const sh = roundRectPath(new THREE.Shape(), W, H, r, 0, H / 2);
+  const glassG = new THREE.ExtrudeGeometry(sh, { depth: GT, bevelEnabled: false, curveSegments: 8 });
+  glassG.translate(0, 0, D / 2 - GT);
+  g.add(Object.assign(new THREE.Mesh(glassG, MATS.dark), { castShadow: true }));
+  const face = new THREE.Mesh(new THREE.ShapeGeometry(sh, 8), MATS.mirror); face.position.z = D / 2 + 0.0005; g.add(face);
+  // frosted LED border, 20 mm wide, inset 20 mm
+  const ring = roundRectPath(new THREE.Shape(), W - 0.04, H - 0.04, r, 0, H / 2);
+  ring.holes.push(roundRectPath(new THREE.Path(), W - 0.08, H - 0.08, r, 0, H / 2));
+  const led = new THREE.Mesh(new THREE.ShapeGeometry(ring, 8), new THREE.MeshStandardMaterial({ color: '#fdfaf2', emissive: '#fff4dc', emissiveIntensity: 0.9, roughness: 0.6 }));
+  led.position.z = D / 2 + 0.001; g.add(led);
+  // ambient glow on the wall around the back box
+  const amb = roundRectPath(new THREE.Shape(), W + 0.03, H + 0.03, 0.02, 0, H / 2);
+  amb.holes.push(roundRectPath(new THREE.Path(), bw, bh, 0.004, 0, H / 2));
+  const glow = new THREE.Mesh(new THREE.ShapeGeometry(amb, 8), new THREE.MeshBasicMaterial({ color: '#fff3dd', transparent: true, opacity: 0.55, depthWrite: false }));
+  glow.position.z = -D / 2 + 0.001; g.add(glow);
+  // touch switch, 95 mm in from the bottom-right corner
+  const sw = roundRectPath(new THREE.Shape(), 0.016, 0.016, 0.003, W / 2 - 0.095, 0.095);
+  const swm = new THREE.Mesh(new THREE.ShapeGeometry(sw, 4), new THREE.MeshBasicMaterial({ color: '#f4f6f8' }));
+  swm.position.z = D / 2 + 0.0015; g.add(swm);
+  // shaver / charging socket on the right side of the back box, near the bottom
+  if (m.socket) {
+    box(0.004, 0.06, 0.035, MATS.white, bw / 2 + 0.002, 0.035 + 0.06, -D / 2 + bd / 2, g);
+    for (const dy of [-0.009, 0.009]) box(0.002, 0.004, 0.004, MATS.dark, bw / 2 + 0.0045, 0.095 + dy, -D / 2 + bd / 2, g);
+  }
   return g;
 }
 
@@ -1344,6 +1379,7 @@ function wetPanel(it, s, m) {
   box(gw, 0.0015, T + 0.0004, edge, flip * 0.006, H - 0.0008, 0, g);
   // wall channel
   box(0.02, H, 0.022, mm, -flip * (W / 2 - 0.01), H / 2, 0, g);
+  if (m.kind === 'bathscreen') { g.traverse((o) => { if (o.material !== glass) o.castShadow = true; }); return g; }
   // bracing bar
   const b = braceInfo(it);
   const L = b.len * MM, sz = b.side === 'front' ? 1 : -1;
@@ -1410,7 +1446,7 @@ export function buildItem(it) {
     case 'porterset': g = porterSet(it, s, m); break;
     case 'porter': g = porter(it, s, m); break;
     case 'walloutlet': g = wallOutlet(it, s, m); break;
-    case 'wetpanel': g = wetPanel(it, s, m); break;
+    case 'wetpanel': case 'bathscreen': g = wetPanel(it, s, m); break;
     case 'niche': g = niche(it, s, m); break;
     case 'shelf':
       if (s.h < 20) { g = new THREE.Group(); box(s.w * MM, s.h * MM, s.d * MM, MATS.glass, 0, s.h * MM / 2, 0, g); box(0.02, 0.03, 0.03, MATS.chrome, -s.w * MM / 2 + 0.04, -0.015, -s.d * MM / 2 + 0.015, g); box(0.02, 0.03, 0.03, MATS.chrome, s.w * MM / 2 - 0.04, -0.015, -s.d * MM / 2 + 0.015, g); }

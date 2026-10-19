@@ -3,9 +3,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { store, select, itemById, emit, commit, modelOf, sizeOf } from './state.js';
-import { wallsOf, outerPts, polyBounds, toWorld, distToSeg } from './geom.js';
+import { wallsOf, outerPts, polyBounds, toWorld, distToSeg, slopeOf, ceilingAt, clipHalf } from './geom.js';
 import { buildItem, boxGeo, mat, MATS, tileTexture, hasTapOn } from './models3d.js';
 import { placeItem, ridersOf, applyRiders } from './place.js';
+import { initVR, vrTick } from './vr.js';
 
 const MM = 0.001;
 export const v3 = { ready: false };
@@ -43,6 +44,17 @@ export function init3d(container, { onDropModel }) {
   const selBox = new THREE.Box3Helper(new THREE.Box3(), 0x2f5d8a); selBox.visible = false; scene.add(selBox);
 
   Object.assign(v3, { renderer, scene, camera, controls, roomGroup, itemGroup, selBox, sun, ceilingLight, container, ready: true, walls: [], cutaway: true, ceiling: false, onDropModel });
+
+  // VR: walls and ceiling all on, no selection box while in the headset
+  v3.setVrMode = (on) => {
+    v3.vr = on;
+    for (const g of v3.walls) g.visible = true;
+    for (const g of itemMeshes.values()) g.visible = true;
+    if (v3.ceilingMesh) v3.ceilingMesh.visible = on || v3.ceiling;
+    if (on) selBox.visible = false;
+    else { updateSelection(); resize(); updateCutaway(); requestRender(); }
+  };
+  initVR(v3, standSpot);
 
   new ResizeObserver(() => resize()).observe(container);
   resize();
@@ -113,12 +125,11 @@ export function init3d(container, { onDropModel }) {
     if (id && fp) onDropModel(id, fp, e.altKey);
   });
 
-  const loop = () => {
-    requestAnimationFrame(loop);
+  renderer.setAnimationLoop(() => {
+    if (renderer.xr.isPresenting) { vrTick(); renderer.render(scene, camera); return; }
     if (!container.offsetParent) return;
     if (controls.update() || v3.dirty) { v3.dirty = false; renderer.render(scene, camera); }
-  };
-  loop();
+  });
 }
 
 export function requestRender() { v3.dirty = true; }
@@ -143,15 +154,19 @@ export function resetCamera() {
   v3.camera.fov = 50; v3.camera.updateProjectionMatrix();
   v3.controls.update(); updateCutaway(); requestRender();
 }
-export function eyeLevel() {
+// Where to stand (metres): just inside the door if there is one, else near the "front" wall, looking across the room.
+export function standSpot() {
   const b = polyBounds(store.d.room.pts);
   const walls = wallsOf(store.d.room.pts);
-  // stand near the door if there is one, else near the "front" wall, looking across the room
   const door = store.d.openings.find((o) => o.type === 'door');
   let px = b.cx, py = b.y1 - 300;
   if (door && walls[door.wall]) { const w = walls[door.wall]; const t = door.offset + door.width / 2; px = w.a.x + w.ux * t + w.nx * 250; py = w.a.y + w.uy * t + w.ny * 250; }
-  v3.camera.position.set(px * MM, 1.6, py * MM);
-  v3.controls.target.set(b.cx * MM, 1.2, b.cy * MM);
+  return { x: px * MM, z: py * MM, lookX: b.cx * MM, lookZ: b.cy * MM };
+}
+export function eyeLevel() {
+  const s = standSpot();
+  v3.camera.position.set(s.x, 1.6, s.z);
+  v3.controls.target.set(s.lookX, 1.2, s.lookZ);
   v3.camera.fov = 70; v3.camera.updateProjectionMatrix();
   v3.controls.update(); updateCutaway(); requestRender();
 }
@@ -188,7 +203,7 @@ export function rebuildRoom() {
   const paint = new THREE.MeshStandardMaterial({ color: room.wallColor, roughness: 0.92 });
   const wt = room.wallTile;
   const tileMat = wt.enabled ? new THREE.MeshStandardMaterial({ map: tileTexture(wt.color, wt.grout, wt.tw, wt.th), roughness: 0.3 }) : null;
-  const shell = new THREE.MeshStandardMaterial({ color: '#d8d6d1', roughness: 0.95 });
+  const shell = new THREE.MeshStandardMaterial({ color: '#d8d6d1', roughness: 0.95, side: THREE.DoubleSide }); // double-sided so a sloped cut through the wall reads as solid
   const topMat = new THREE.MeshStandardMaterial({ color: '#4a4f57', roughness: 0.9 });
 
   v3.walls = [];
@@ -259,12 +274,35 @@ export function rebuildRoom() {
     v3.walls.push(g);
   }
 
-  // ceiling
-  const cg = new THREE.ShapeGeometry(new THREE.Shape(pts.map((p) => new THREE.Vector2(p.x * MM, -p.y * MM)))); cg.rotateX(Math.PI / 2);
-  const ceil = new THREE.Mesh(cg, new THREE.MeshStandardMaterial({ color: '#f6f5f2', side: THREE.DoubleSide }));
-  ceil.position.y = H; ceil.visible = v3.ceiling; ceil.userData.ceiling = true; v3.ceilingMesh = ceil; roomGroup.add(ceil);
-  // flip ceiling shape orientation (rotateX(+90) maps -y→-z; use positive y)
-  cg.scale(1, 1, -1);
+  // ceiling: flat, or a sloped part from the low wall up to full height plus the flat remainder.
+  // A sloped ceiling also clips everything above it (walls, built-out walls, anything too tall for the roof).
+  const slope = slopeOf(room);
+  const ceil = new THREE.Group();
+  const ceilMat = new THREE.MeshStandardMaterial({ color: '#f6f5f2', side: THREE.DoubleSide });
+  const ceilPart = (poly) => {
+    if (poly.length < 3) return;
+    const g = new THREE.ShapeGeometry(new THREE.Shape(poly.map((p) => new THREE.Vector2(p.x * MM, p.y * MM))));
+    const pos = g.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), z = pos.getY(i);
+      pos.setXYZ(i, x, ceilingAt(room, x / MM, z / MM) * MM - 0.001, z);
+    }
+    g.computeVertexNormals();
+    ceil.add(new THREE.Mesh(g, ceilMat));
+  };
+  if (slope) {
+    // extend the sloped part over the wall tops so the roof reads as one surface from outside
+    ceilPart(clipHalf(outer, slope.w.a, -slope.w.nx, -slope.w.ny, -slope.run));
+    ceilPart(clipHalf(pts, slope.w.a, slope.w.nx, slope.w.ny, slope.run));
+  } else ceilPart(pts);
+  ceil.visible = v3.ceiling; ceil.userData.ceiling = true; v3.ceilingMesh = ceil; roomGroup.add(ceil);
+  if (slope) {
+    // keep where y <= low + k·d  (d = distance in from the low wall, metres)
+    const { w, low, k } = slope;
+    const plane = new THREE.Plane(new THREE.Vector3(k * w.nx, -1, k * w.ny), (low - k * (w.a.x * w.nx + w.a.y * w.ny)) * MM);
+    plane.normalize();
+    v3.renderer.clippingPlanes = [plane];
+  } else v3.renderer.clippingPlanes = [];
 
   const b = polyBounds(pts);
   v3.sun.position.set(b.cx * MM + 2.5, 5, b.cy * MM + 3.5);
@@ -272,7 +310,7 @@ export function rebuildRoom() {
   const ext = Math.max(b.w, b.h) * MM;
   Object.assign(v3.sun.shadow.camera, { left: -ext, right: ext, top: ext, bottom: -ext, near: 0.5, far: 15 });
   v3.sun.shadow.camera.updateProjectionMatrix();
-  v3.ceilingLight.position.set(b.cx * MM, H - 0.1, b.cy * MM);
+  v3.ceilingLight.position.set(b.cx * MM, ceilingAt(room, b.cx, b.cy) * MM - 0.1, b.cy * MM);
   updateCutaway();
   requestRender();
 }
@@ -338,7 +376,7 @@ function addOpening(g, w, o, room) {
 }
 
 function updateCutaway() {
-  if (!v3.ready) return;
+  if (!v3.ready || v3.vr) return;
   const cam = v3.camera.position;
   const H = store.d.room.height * MM;
   for (const g of v3.walls) {
@@ -422,7 +460,7 @@ export function rebuildItems() {
 }
 
 export function updateSelection() {
-  if (!v3.ready) return;
+  if (!v3.ready || v3.vr) return;
   const s = store.sel;
   const g = s?.type === 'item' ? itemMeshes.get(s.id) : null;
   if (g) { g.updateMatrixWorld(true); v3.selBox.box.setFromObject(g); v3.selBox.visible = true; }

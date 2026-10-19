@@ -69,7 +69,7 @@ export const CATS = [
   { id: 'worktop', label: 'Worktops', kinds: ['worktop', 'console'] },
   { id: 'taps', label: 'Taps & showers', kinds: ['walltap', 'tap', 'bathmixer', 'showervalve', 'showerhead', 'porterset', 'handshower', 'walloutlet', 'porter', 'showerrail'] },
   { id: 'acc', label: 'Towel holders & accessories', kinds: ['towelholder', 'accessory'] },
-  { id: 'shower', label: 'Shower glass & trays', kinds: ['wetpanel', 'glass', 'tray'] },
+  { id: 'shower', label: 'Shower glass & trays', kinds: ['wetpanel', 'bathscreen', 'glass', 'tray'] },
   { id: 'wc', label: 'WC, bath & rails', kinds: ['toilet', 'wc', 'bath', 'towelrail', 'radiator'] },
   { id: 'room', label: 'Walls, boxing & doors', kinds: ['falsewall', 'niche', 'door', 'window', 'box'] },
 ];
@@ -134,6 +134,36 @@ const MERLYN = {
     variants: [['Chrome/clear', w === 1000 ? '8W10' : ''], ['Brushed bronze/clear', w === 1000 ? '8W10BBZ' : ''], ['Brushed gunmetal/clear', w === 1000 ? '8W10BGM' : ''], ['Brushed nickel/clear', w === 1000 ? '8W10BN' : ''], ['Brushed brass/clear', w === 1000 ? '8W10BBR' : '']]
       .map(([colour, sku]) => ({ sku, colour, price: '', img: 'data/img/merlyn/wetroom-panel-chrome.webp', url: MERLYN_URL })),
   })),
+};
+
+// Merlyn MB14 fixed square bath screen: 8 mm glass with Mershield, chrome wall profile with 15 mm adjustment
+// (785–800 mm), reversible. Sits on the bath rim; prices from sanctuary-bathrooms.co.uk.
+const MB14_URL = 'https://www.sanctuary-bathrooms.co.uk/merlyn-mb14-fixed-square-panel-bath-screen';
+const MB14 = {
+  id: 'merlyn-mb14-fixed-square-bath-screen', name: 'Merlyn 8mm Fixed Square Bath Screen (MB14)', kind: 'bathscreen',
+  brand: 'Merlyn', range: '8mm Bath Screens', cat: 'showers', front: 'plain', drawers: 0, doors: 0, hinge: '', double: false, shape: 'rect',
+  thumb: 'data/img/merlyn/mb14-bath-screen-chrome.webp',
+  note: '8 mm toughened clear glass with Mershield easy-clean coating, frameless with a wall profile (785–800 mm adjustment), reversible. Drop it on a bath and it stands on the rim, end-on to the wall.',
+  sizes: [{ w: 800, d: 8, h: 1500, variants: [['Chrome/clear', 218.40, ''], ['Matt black/clear', 246.24, '-matt-black-frameless-fixed-bath-screen'], ['Brushed brass/clear', 246.24, '-brushed-brass-frameless-fixed-bath-screen'], ['Brushed bronze/clear', 246.24, '-brushed-bronze-frameless-fixed-bath-screen']]
+    .map(([colour, price, slug]) => ({ sku: 'MB14', colour, price: `£${price.toFixed(2)}`, img: 'data/img/merlyn/mb14-bath-screen-chrome.webp', url: slug ? `https://www.sanctuary-bathrooms.co.uk/merlyn-mb14${slug}` : MB14_URL })) }],
+};
+
+// HiB Vega LED mirrors (hib.co.uk): colour-changing 2800–6400 K LED border, ambient light, heated demister pad,
+// 2-pin shaver/charging socket on the side, touch switch, IP44, 55 mm off the wall.
+const VEGA_URL = 'https://www.hib.co.uk/products/vega-led-mirror';
+const VEGA = {
+  id: 'hib-vega-led-mirror', name: 'HiB Vega LED Mirror', kind: 'mirror', led: 'border', socket: true,
+  brand: 'HiB', range: 'Vega', cat: 'mirrors', front: 'plain', drawers: 0, doors: 0, hinge: '', double: false, shape: 'rect',
+  thumb: 'data/img/hib/vega-60.webp',
+  note: 'Colour-temperature changing LED border (2800–6400 K) with ambient glow, heated demister pad, 2-pin shaver/charging socket on the side, touch switch. IP44, 55 mm deep.',
+  sizes: [
+    [600, 800, '78751000', 529, '60cm'],
+    [400, 800, '78749000', 484, '40cm'],
+    [500, 700, '78750000', 484, '50cm'],
+    [800, 600, '78752000', 529, '80cm'],
+    [1000, 600, '78752500', 632, 'h60xw100cm'],
+    [1200, 600, '78748000', 735, '120cm'],
+  ].map(([w, h, sku, price, q]) => ({ w, d: 55, h, variants: [{ sku, colour: 'Mirror', price: `£${price}`, img: 'data/img/hib/vega-60.webp', url: `${VEGA_URL}?size=${q}` }] })),
 };
 
 // HiB Vanquish recessed mirror cabinet (hib.co.uk): LED 2800–6400 K, heated pad, charging socket, soft close,
@@ -209,7 +239,7 @@ export async function loadCatalog() {
   const [data, vb, hg] = await Promise.all([load('data/catalog.json'), load('data/catalog_vb.json'), load('data/catalog_hg.json')]);
   for (const m of data) { m.brand = 'Dansani'; m.range = 'Luna'; }
   for (const m of GENERIC) { m.brand = m.brand || (m.mtm ? 'Dansani' : 'Generic'); m.range = m.range || (m.mtm ? 'Luna' : ''); }
-  MODELS = [...GENERIC.filter((g) => g.mtm), ...data, ...vb, ...hg, ...ARCHITECTURA, MERLYN, VANQUISH, ...GENERIC.filter((g) => !g.mtm)];
+  MODELS = [...GENERIC.filter((g) => g.mtm), ...data, ...vb, ...hg, ...ARCHITECTURA, MERLYN, MB14, VANQUISH, VEGA, ...GENERIC.filter((g) => !g.mtm)];
   for (const m of MODELS) if (m.kind === 'showerhead' && !m.generic) normaliseShowerHead(m);
   // Logis concealed basin mixers: listing gives overall height and no width; use the wall-plate size
   for (const m of MODELS) if (m.kind === 'walltap' && /logis/i.test(m.name)) for (const s of m.sizes) { s.w = /fine/i.test(m.name) ? 220 : 200; s.h = 80; }
@@ -262,7 +292,7 @@ export const BRANDS = [
   { id: 'hansgrohe', label: 'hansgrohe', test: (m) => m.brand === 'hansgrohe' },
   { id: 'logis', label: 'hansgrohe Logis', test: (m) => m.brand === 'hansgrohe' && m.range === 'Logis' },
   { id: 'merlyn', label: 'Merlyn shower glass', test: (m) => m.brand === 'Merlyn' },
-  { id: 'hib', label: 'HiB cabinets', test: (m) => m.brand === 'HiB' },
+  { id: 'hib', label: 'HiB mirrors & cabinets', test: (m) => m.brand === 'HiB' },
   { id: 'generic', label: 'Generic', test: (m) => m.brand === 'Generic' },
 ];
 
@@ -293,12 +323,13 @@ export function defaultElev(kind, h) {
     case 'tap': return 865;
     case 'showervalve': return 1000;
     case 'bathmixer': return 760;
+    case 'bathscreen': return 580;
     case 'showerhead': return 2150;
     default: return 0;
   }
 }
 
-export const WALL_MOUNTED = new Set(['vanity', 'base', 'open', 'tall', 'wall', 'mirrorcab', 'mirror', 'shelf', 'toilet', 'wc', 'towelrail', 'radiator', 'worktop', 'console', 'glass', 'bath', 'tray', 'box', 'basin', 'falsewall', 'walltap', 'bathmixer', 'showervalve', 'showerhead', 'towelholder', 'handshower', 'showerrail', 'accessory', 'porterset', 'porter', 'walloutlet', 'wetpanel', 'niche']);
+export const WALL_MOUNTED = new Set(['vanity', 'base', 'open', 'tall', 'wall', 'mirrorcab', 'mirror', 'shelf', 'toilet', 'wc', 'towelrail', 'radiator', 'worktop', 'console', 'glass', 'bath', 'tray', 'box', 'basin', 'falsewall', 'walltap', 'bathmixer', 'showervalve', 'showerhead', 'towelholder', 'handshower', 'showerrail', 'accessory', 'porterset', 'porter', 'walloutlet', 'wetpanel', 'bathscreen', 'niche']);
 export const STACKS_ON = new Set(['basin', 'ctbasin', 'worktop', 'tap']);
 export const SUPPORTS = new Set(['vanity', 'base', 'open', 'worktop', 'console', 'falsewall', 'basin', 'ctbasin']);
 export const ABOVE_FLOOR_DASHED = new Set(['wall', 'mirrorcab', 'mirror', 'shelf']);

@@ -31,6 +31,12 @@ function itemsOnWall(w, exclude) {
   return res;
 }
 
+// A bath screen stands on the rim of the bath it is over.
+function sitOnBath(it, exclude) {
+  const b = store.d.items.find((o) => !exclude.has(o.id) && modelOf(o)?.kind === 'bath' && pointInPoly({ x: it.x, y: it.y }, itemCorners(o, sizeOf(o).w, sizeOf(o).d)));
+  if (b) it.elev = b.elev + sizeOf(b).h;
+}
+
 export function findSupport(it, p, exclude) {
   const isTap = modelOf(it)?.kind === 'tap';
   const ok = (k) => isTap ? ['basin', 'ctbasin', 'worktop', 'vanity', 'base', 'console'].includes(k) : !['basin', 'ctbasin'].includes(k);
@@ -81,7 +87,7 @@ export function placeItem(it, p, opts = {}) {
   }
 
   // 2a. Glass panels stand end-on to a wall (channel against it), not flat against it.
-  if (m.kind === 'wetpanel' || (m.kind === 'glass' && s.d <= 300)) {
+  if (m.kind === 'wetpanel' || m.kind === 'bathscreen' || (m.kind === 'glass' && s.d <= 300)) {
     const walls = [...wallsOf(store.d.room.pts), ...builtOutFaces(it, s, exclude)];
     let best = null;
     for (const w of walls) {
@@ -98,6 +104,7 @@ export function placeItem(it, p, opts = {}) {
       t = cands.find((c) => Math.abs(t - c) < tol) ?? snap(t, GRID);
       it.x = w.a.x + w.ux * t + w.nx * (s.w / 2);
       it.y = w.a.y + w.uy * t + w.ny * (s.w / 2);
+      if (m.kind === 'bathscreen') sitOnBath(it, exclude);
       return guides;
     }
   }

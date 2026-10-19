@@ -196,6 +196,7 @@ function itemPanel(el, it) {
 
     ${m.kind === 'falsewall' ? nicheHtml(it) : ''}
     ${m.kind === 'wetpanel' ? braceHtml(it) : ''}
+    ${m.kind === 'bathscreen' ? `<h4>Fitting</h4><div class="row"><label>Wall profile end</label><select data-k="wpChannel"><option value="start" ${it.cfg?.channel !== 'end' ? 'selected' : ''}>Start</option><option value="end" ${it.cfg?.channel === 'end' ? 'selected' : ''}>End</option></select></div><div class="note">Stands on the rim of the bath below it (top of the bath ${(() => { const b = store.d.items.find((o) => modelOf(o)?.kind === 'bath' && Math.abs(it.elev - o.elev - sizeOf(o).h) < 2); return b ? 'found' : 'not found — set the height off the floor to the bath rim'; })()}).</div>` : ''}
     ${m.kind === 'toilet' ? flushHtml(it) : ''}
     ${m.kind === 'bath' && m.shape !== 'oval' ? bathHtml(it, m) : ''}
     ${m.kind === 'niche' ? `<h4>Niche</h4><div class="row"><label>LED strip</label><input type="checkbox" data-k="nkLed" ${it.cfg?.led !== false ? 'checked' : ''}></div><div class="note">Place it on a wall face — it cuts its own recess. On a real wall the depth is limited to the wall thickness.</div>` : ''}
@@ -499,6 +500,18 @@ function roomPanel(el) {
     <h4>Structure</h4>
     ${num('Ceiling height', 'height', r.height)}
     ${num('Wall thickness', 'thick', r.thickness)}
+    <div class="row" style="margin-top:6px"><label>Sloped ceiling</label><input type="checkbox" data-k="slOn" ${r.slope?.on ? 'checked' : ''}></div>
+    ${r.slope?.on ? (() => {
+      const sl = r.slope, rise = r.height - Math.min(r.height, sl.low ?? 1200);
+      const pitch = Math.round(Math.atan2(rise, Math.max(1, sl.run ?? 1500)) * 180 / Math.PI);
+      return `<div class="grid2">
+      <div class="fld"><span>Low side</span><select data-k="slWall">${walls.map((w, i) => `<option value="${i}" ${sl.wall === i ? 'selected' : ''}>Wall ${i + 1} (${Math.round(w.len)} mm)</option>`).join('')}</select></div>
+      <div class="fld"><span>Height at low wall</span><input type="number" data-k="slLow" value="${sl.low ?? 1200}" step="10"></div>
+      <div class="fld"><span>Slope reaches full height at</span><input type="number" data-k="slRun" value="${sl.run ?? 1500}" step="10"></div>
+      <div class="fld"><span>Pitch (°)</span><input type="number" data-k="slPitch" value="${pitch}" min="5" max="75"></div>
+    </div>
+    <div class="note">The ceiling is ${sl.low ?? 1200} mm high at wall ${sl.wall + 1} and rises to ${r.height} mm, ${sl.run ?? 1500} mm into the room. In 2D the dashed lines show where full height starts and where headroom reaches 2000 mm. Select a wall in Edit room to see its number.</div>`;
+    })() : ''}
 
     <h4>Finishes</h4>
     <div class="row"><label>Wall paint</label><input type="color" data-k="wallColor" value="${r.wallColor}"></div>
@@ -530,6 +543,18 @@ function roomPanel(el) {
     drawRoom: () => document.getElementById('toolDraw')?.click(),
     height: (v) => R(() => { r.height = Math.max(1500, +v); }),
     thick: (v) => R(() => { r.thickness = Math.max(20, +v); }),
+    slOn: (v) => R(() => {
+      if (!r.slope) {
+        // default: low side on the longest wall that has no door
+        const doorWalls = new Set(store.d.openings.filter((o) => o.type === 'door').map((o) => o.wall));
+        const best = walls.filter((w) => !doorWalls.has(w.i)).sort((x, y) => y.len - x.len)[0] || walls[0];
+        r.slope = { on: true, wall: best.i, low: 1200, run: 1500 };
+      } else r.slope.on = v;
+    }),
+    slWall: (v) => R(() => { r.slope.wall = +v; }),
+    slLow: (v) => R(() => { r.slope.low = Math.max(300, Math.min(r.height, +v)); }),
+    slRun: (v) => R(() => { r.slope.run = Math.max(100, +v); }),
+    slPitch: (v) => R(() => { const a = Math.max(5, Math.min(75, +v)) * Math.PI / 180; r.slope.run = Math.max(100, Math.round((r.height - r.slope.low) / Math.tan(a))); }),
     wallColor: (v) => R(() => { r.wallColor = v; }),
     wtOn: (v) => R(() => { r.wallTile.enabled = v; }),
     wtH: (v) => R(() => { r.wallTile.height = Math.max(0, +v); }),
