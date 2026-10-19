@@ -110,7 +110,7 @@ export function placeItem(it, p, opts = {}) {
   }
 
   // 2. Snap against the nearest wall (ceiling-mounted shower heads hang free).
-  if (WALL_MOUNTED.has(m.kind) && !(m.kind === 'showerhead' && /ceiling/i.test(m.name))) {
+  if (WALL_MOUNTED.has(m.kind) && !(m.kind === 'showerhead' && /ceiling/i.test(m.name)) && !(m.kind === 'fan' && it.cfg?.mount === 'ceiling')) {
     const walls = [...wallsOf(store.d.room.pts), ...builtOutFaces(it, s, exclude)];
     let best = null;
     for (const w of walls) {

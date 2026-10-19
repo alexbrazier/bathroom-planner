@@ -71,6 +71,7 @@ export const CATS = [
   { id: 'acc', label: 'Towel holders & accessories', kinds: ['towelholder', 'accessory'] },
   { id: 'shower', label: 'Shower glass & trays', kinds: ['wetpanel', 'bathscreen', 'glass', 'tray'] },
   { id: 'wc', label: 'WC, bath & rails', kinds: ['toilet', 'wc', 'bath', 'towelrail', 'radiator'] },
+  { id: 'fan', label: 'Extractor fans', kinds: ['fan'] },
   { id: 'room', label: 'Walls, boxing & doors', kinds: ['falsewall', 'niche', 'door', 'window', 'box'] },
 ];
 
@@ -231,6 +232,16 @@ const ARCHITECTURA = [
   },
 ];
 
+// Vent-Axia 446659B (Screwfix 260HV): 100 mm axial fan with overrun timer, 54 m³/h, 12 dBA at 3 m, Zone 1,
+// backdraft shutter. 160 × 160 mm face; 117 mm overall of which ~87 mm is the spigot inside the wall/ceiling.
+const VENTAXIA = {
+  id: 'ventaxia-446659b-100mm-axial-fan-timer', name: 'Vent-Axia 446659B 100mm Axial Extractor Fan with Timer', kind: 'fan',
+  brand: 'Vent-Axia', range: 'Extractor fans', cat: 'fans', front: 'plain', drawers: 0, doors: 0, hinge: '', double: false, shape: 'rect',
+  thumb: 'data/img/ventaxia/446659b.webp',
+  note: '100 mm (4") duct, 54 m³/h, overrun timer (up to 20 min), backdraft shutter, Zone 1 rated, 240 V. Ducting not included. Wall or ceiling mounted — choose below; ~87 mm of the body sits inside the wall or ceiling.',
+  sizes: [{ w: 160, d: 30, h: 160, variants: [{ sku: '446659B', colour: 'White', price: '£75.00', img: 'data/img/ventaxia/446659b.webp', url: 'https://www.screwfix.com/p/vent-axia-446659b-100mm-4-axial-bathroom-extractor-fan-with-timer-white-240v/260hv' }] }],
+};
+
 export let MODELS = [];
 export const byId = new Map();
 
@@ -239,7 +250,7 @@ export async function loadCatalog() {
   const [data, vb, hg] = await Promise.all([load('data/catalog.json'), load('data/catalog_vb.json'), load('data/catalog_hg.json')]);
   for (const m of data) { m.brand = 'Dansani'; m.range = 'Luna'; }
   for (const m of GENERIC) { m.brand = m.brand || (m.mtm ? 'Dansani' : 'Generic'); m.range = m.range || (m.mtm ? 'Luna' : ''); }
-  MODELS = [...GENERIC.filter((g) => g.mtm), ...data, ...vb, ...hg, ...ARCHITECTURA, MERLYN, MB14, VANQUISH, VEGA, ...GENERIC.filter((g) => !g.mtm)];
+  MODELS = [...GENERIC.filter((g) => g.mtm), ...data, ...vb, ...hg, ...ARCHITECTURA, MERLYN, MB14, VANQUISH, VEGA, VENTAXIA, ...GENERIC.filter((g) => !g.mtm)];
   for (const m of MODELS) if (m.kind === 'showerhead' && !m.generic) normaliseShowerHead(m);
   // Logis concealed basin mixers: listing gives overall height and no width; use the wall-plate size
   for (const m of MODELS) if (m.kind === 'walltap' && /logis/i.test(m.name)) for (const s of m.sizes) { s.w = /fine/i.test(m.name) ? 220 : 200; s.h = 80; }
@@ -293,6 +304,7 @@ export const BRANDS = [
   { id: 'logis', label: 'hansgrohe Logis', test: (m) => m.brand === 'hansgrohe' && m.range === 'Logis' },
   { id: 'merlyn', label: 'Merlyn shower glass', test: (m) => m.brand === 'Merlyn' },
   { id: 'hib', label: 'HiB mirrors & cabinets', test: (m) => m.brand === 'HiB' },
+  { id: 'ventaxia', label: 'Vent-Axia fans', test: (m) => m.brand === 'Vent-Axia' },
   { id: 'generic', label: 'Generic', test: (m) => m.brand === 'Generic' },
 ];
 
@@ -324,12 +336,13 @@ export function defaultElev(kind, h) {
     case 'showervalve': return 1000;
     case 'bathmixer': return 760;
     case 'bathscreen': return 580;
+    case 'fan': return 2050;
     case 'showerhead': return 2150;
     default: return 0;
   }
 }
 
-export const WALL_MOUNTED = new Set(['vanity', 'base', 'open', 'tall', 'wall', 'mirrorcab', 'mirror', 'shelf', 'toilet', 'wc', 'towelrail', 'radiator', 'worktop', 'console', 'glass', 'bath', 'tray', 'box', 'basin', 'falsewall', 'walltap', 'bathmixer', 'showervalve', 'showerhead', 'towelholder', 'handshower', 'showerrail', 'accessory', 'porterset', 'porter', 'walloutlet', 'wetpanel', 'bathscreen', 'niche']);
+export const WALL_MOUNTED = new Set(['vanity', 'base', 'open', 'tall', 'wall', 'mirrorcab', 'mirror', 'shelf', 'toilet', 'wc', 'towelrail', 'radiator', 'worktop', 'console', 'glass', 'bath', 'tray', 'box', 'basin', 'falsewall', 'walltap', 'bathmixer', 'showervalve', 'showerhead', 'towelholder', 'handshower', 'showerrail', 'accessory', 'porterset', 'porter', 'walloutlet', 'wetpanel', 'bathscreen', 'niche', 'fan']);
 export const STACKS_ON = new Set(['basin', 'ctbasin', 'worktop', 'tap']);
 export const SUPPORTS = new Set(['vanity', 'base', 'open', 'worktop', 'console', 'falsewall', 'basin', 'ctbasin']);
 export const ABOVE_FLOOR_DASHED = new Set(['wall', 'mirrorcab', 'mirror', 'shelf']);

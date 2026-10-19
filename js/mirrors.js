@@ -9,6 +9,7 @@ export const AVATAR_LAYER = 10;
 let enabled = true;
 try { enabled = localStorage.getItem('bathroom-designer:reflections') !== 'off'; } catch { /* ignore */ }
 let busy = false; // a reflection never renders other reflections (mirrors facing each other would recurse)
+const live = new Map(); // reflector → its plain mirror face (shown instead when viewed from outside the room)
 
 export const reflectionsOn = () => enabled;
 export function setReflections(on) {
@@ -40,12 +41,20 @@ export function addReflections(group, vr = false) {
       busy = true;
       try { render.apply(this, args); } finally { busy = false; }
     };
+    // keep the plain mirror face as a fallback for views from outside the room (see showReflections)
+    face.visible = false;
     face.parent.add(r);
-    face.parent.remove(face);
+    live.set(r, face);
   }
 }
 
 // Free a group's GPU resources, including reflector render targets.
 export function disposeGroup(g) {
-  g.traverse((c) => { c.geometry?.dispose(); if (c.isReflector) c.dispose(); });
+  g.traverse((c) => { c.geometry?.dispose(); if (c.isReflector) { c.dispose(); live.delete(c); } });
+}
+
+// Reflections only make sense from inside the room; from an orbit view outside, the mirrored camera would look at
+// the back of the walls. Outside, show the plain mirror finish instead.
+export function showReflections(on) {
+  for (const [r, face] of live) { r.visible = on; face.visible = !on; }
 }

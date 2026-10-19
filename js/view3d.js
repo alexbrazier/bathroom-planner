@@ -3,11 +3,11 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { store, select, itemById, emit, commit, modelOf, sizeOf } from './state.js';
-import { wallsOf, outerPts, polyBounds, toWorld, distToSeg, slopeOf, ceilingAt, clipHalf } from './geom.js';
+import { wallsOf, outerPts, polyBounds, toWorld, distToSeg, slopeOf, ceilingAt, clipHalf, pointInPoly } from './geom.js';
 import { buildItem, boxGeo, mat, MATS, tileTexture, hasTapOn } from './models3d.js';
 import { placeItem, ridersOf, applyRiders } from './place.js';
 import { initVR, vrTick } from './vr.js';
-import { addReflections, disposeGroup as disposeItem, reflectionsOn, setReflections as setRefl } from './mirrors.js';
+import { addReflections, disposeGroup as disposeItem, reflectionsOn, setReflections as setRefl, showReflections } from './mirrors.js';
 
 const MM = 0.001;
 export const v3 = { ready: false };
@@ -128,9 +128,14 @@ export function init3d(container, { onDropModel }) {
   });
 
   renderer.setAnimationLoop(() => {
-    if (renderer.xr.isPresenting) { vrTick(); renderer.render(scene, camera); return; }
+    if (renderer.xr.isPresenting) { vrTick(); showReflections(true); renderer.render(scene, camera); return; }
     if (!container.offsetParent) return;
-    if (controls.update() || v3.dirty) { v3.dirty = false; renderer.render(scene, camera); }
+    if (controls.update() || v3.dirty) {
+      v3.dirty = false;
+      const c = camera.position, room = store.d.room;
+      showReflections(c.y > 0 && c.y * 1000 < ceilingAt(room, c.x * 1000, c.z * 1000) && pointInPoly({ x: c.x * 1000, y: c.z * 1000 }, room.pts));
+      renderer.render(scene, camera);
+    }
   });
 }
 

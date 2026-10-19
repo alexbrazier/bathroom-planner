@@ -6,7 +6,7 @@ import { setWallLength, addOpening } from './ui.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 let host, bars = {};
-let lastKey = '';
+let lastKey = '', lastTarget = '';
 
 export function initOverlays(view) {
   host = view;
@@ -42,9 +42,13 @@ function sync() {
   const wall = tool === 'room' && s?.type === 'wall' ? walls[s.index] : null;
   const op = tool === 'room' && s?.type === 'opening' ? d.openings.find((o) => o.id === s.id) : null;
   const key = JSON.stringify([tool, s, ro, wall && Math.round(wall.len), op, plan.drawPts?.length, !!plan.measure?.done, (d.dims || []).length]);
+  // Don't rebuild a bar under the user's cursor while they type — unless the selection itself changed (then the
+  // bar must show the new wall/door/window, and the half-typed field belongs to the old one).
+  const target = JSON.stringify([tool, s?.type, s?.id, s?.index]);
   const focused = host.contains(document.activeElement) && document.activeElement.tagName === 'INPUT';
-  const rebuild = key !== lastKey && !focused;
-  if (rebuild) lastKey = key;
+  if (target !== lastTarget && focused) document.activeElement.blur();
+  const rebuild = key !== lastKey && (!focused || target !== lastTarget);
+  if (rebuild) { lastKey = key; lastTarget = target; }
 
   // ---- wall bar
   const wb = bars.wallBar;
@@ -78,20 +82,24 @@ function sync() {
                  <button data-a="swing" title="Open into or out of the room">${op.swing === 'out' ? '↑ Opens out' : '↓ Opens in'}</button>`
                : `<label class="fb-num">Sill <input type="number" data-f="sill" value="${op.sill}"></label>`}
         <button data-a="del" class="danger" title="Delete">Delete</button>`;
-      const clamp = () => { op.width = Math.max(300, Math.min(w.len, op.width)); op.offset = Math.max(0, Math.min(w.len - op.width, op.offset)); };
+      // look the opening up when used: undo/redo replace the design, so a captured object can be stale
+      const id = op.id;
+      const cur = () => store.d.openings.find((o) => o.id === id);
+      const edit = (fn) => { if (cur()) mutate(() => { const o = cur(); if (o) fn(o); }); };
+      const clamp = (o) => { const ww = wallsOf(store.d.room.pts)[o.wall]; o.width = Math.max(300, Math.min(ww.len, o.width)); o.offset = Math.max(0, Math.min(ww.len - o.width, o.offset)); };
       ob.querySelectorAll('input').forEach((inp) => {
         inp.onkeydown = (e) => { if (e.key === 'Enter') e.target.blur(); };
-        inp.onchange = () => mutate(() => {
+        inp.onchange = () => edit((op) => {
           const f = inp.dataset.f, v = num(inp.value);
-          if (f === 'width') { const c = op.offset + op.width / 2; op.width = v; op.offset = c - v / 2; clamp(); }
+          if (f === 'width') { const c = op.offset + op.width / 2; op.width = v; op.offset = c - v / 2; clamp(op); }
           if (f === 'height') op.height = Math.max(200, v);
           if (f === 'sill') op.sill = Math.max(0, v);
         });
       });
       const b = (a) => ob.querySelector(`[data-a=${a}]`);
-      if (b('hinge')) b('hinge').onclick = () => mutate(() => { op.hinge = op.hinge === 'right' ? 'left' : 'right'; });
-      if (b('swing')) b('swing').onclick = () => mutate(() => { op.swing = op.swing === 'out' ? 'in' : 'out'; });
-      b('del').onclick = () => mutate(() => { d.openings = d.openings.filter((o) => o !== op); store.sel = null; });
+      if (b('hinge')) b('hinge').onclick = () => edit((op) => { op.hinge = op.hinge === 'right' ? 'left' : 'right'; });
+      if (b('swing')) b('swing').onclick = () => edit((op) => { op.swing = op.swing === 'out' ? 'in' : 'out'; });
+      b('del').onclick = () => mutate(() => { store.d.openings = store.d.openings.filter((o) => o.id !== id); store.sel = null; });
     }
     const t = op.offset + op.width / 2;
     place(ob, { x: w.a.x + w.ux * t + w.nx * 70 / plan.scale, y: w.a.y + w.uy * t + w.ny * 70 / plan.scale }, 0);

@@ -1,7 +1,7 @@
 // Library panel, properties panel and parts list.
 import { MODELS, CATS, catOf, byId, parsePrice, fmtPrice, currencyOf, BRANDS, colourPair, defaultElev, STACKS_ON, SUPPORTS } from './catalog.js';
 import { store, checkpoint, commit, select, modelOf, sizeOf, variantOf, cfgOf, priceOf, itemById, uid, defaultRoom, nicheOf, switchRoom } from './state.js';
-import { wallsOf, polyBounds, normAngle, snap, pointInPoly } from './geom.js';
+import { wallsOf, polyBounds, normAngle, snap, pointInPoly, ceilingAt } from './geom.js';
 import { addModelAt, clearances, splitWall, removeVertex, plan, drawActions } from './plan2d.js';
 import { placeItem, ridersOf, applyRiders, findSupport } from './place.js';
 import { braceInfo, flushInfo, bathInfo } from './models3d.js';
@@ -208,6 +208,7 @@ function itemPanel(el, it) {
     ${m.kind === 'bathscreen' ? `<h4>Fitting</h4><div class="row"><label>Wall profile end</label><select data-k="wpChannel"><option value="start" ${it.cfg?.channel !== 'end' ? 'selected' : ''}>Start</option><option value="end" ${it.cfg?.channel === 'end' ? 'selected' : ''}>End</option></select></div><div class="note">Stands on the rim of the bath below it (top of the bath ${(() => { const b = store.d.items.find((o) => modelOf(o)?.kind === 'bath' && Math.abs(it.elev - o.elev - sizeOf(o).h) < 2); return b ? 'found' : 'not found — set the height off the floor to the bath rim'; })()}).</div>` : ''}
     ${m.kind === 'toilet' ? flushHtml(it) : ''}
     ${m.kind === 'bath' && m.shape !== 'oval' ? bathHtml(it, m) : ''}
+    ${m.kind === 'fan' ? `<h4>Mounting</h4><div class="row"><label>Fitted on</label><select data-k="fanMount"><option value="wall" ${it.cfg?.mount !== 'ceiling' ? 'selected' : ''}>Wall</option><option value="ceiling" ${it.cfg?.mount === 'ceiling' ? 'selected' : ''}>Ceiling</option></select></div><div class="note">${it.cfg?.mount === 'ceiling' ? 'Flush to the ceiling — drag it to where the duct can run.' : 'High on the wall, ideally opposite the door and close to the shower.'}</div>` : ''}
     ${m.kind === 'niche' ? `<h4>Niche</h4><div class="row"><label>LED strip</label><input type="checkbox" data-k="nkLed" ${it.cfg?.led !== false ? 'checked' : ''}></div><div class="note">Place it on a wall face — it cuts its own recess. On a real wall the depth is limited to the wall thickness.</div>` : ''}
     ${vars.length > 1 || bespoke ? `<h4>Colour</h4><div class="swatches">${swatches}</div>` : ''}
     ${bespoke ? `<div class="row" style="margin-top:8px"><label>Bespoke colour</label><input type="color" data-k="bespoke" value="${it.bespoke || '#8b9a86'}"></div>` : ''}
@@ -272,6 +273,11 @@ function itemPanel(el, it) {
     'cl-front': (val) => moveClear(it, 'front', +val),
     wpChannel: (val) => mutate(() => { if ((it.cfg?.channel === 'end') !== (val === 'end')) it.rot = normAngle(it.rot + 180); it.cfg = { ...(it.cfg || {}), channel: val }; }),
     wcFlush: (val) => mutate(() => { it.cfg = { ...(it.cfg || {}), flush: val }; }),
+    fanMount: (val) => mutate(() => {
+      it.cfg = { ...(it.cfg || {}), mount: val };
+      if (val === 'ceiling') { it.elev = Math.round(ceilingAt(store.d.room, it.x, it.y) - sz.d); it.x += -Math.sin(it.rot * Math.PI / 180) * 300; it.y += Math.cos(it.rot * Math.PI / 180) * 300; }
+      else { it.elev = defaultElev('fan', sz.h); placeItem(it, { x: it.x, y: it.y }); }
+    }),
     bFront: (val) => mutate(() => { it.cfg = { ...(it.cfg || {}), frontPanel: val }; }),
     bEnd: (val) => mutate(() => { it.cfg = { ...(it.cfg || {}), endPanel: val }; }),
     bWaste: (val) => mutate(() => { it.cfg = { ...(it.cfg || {}), wasteEnd: val }; }),

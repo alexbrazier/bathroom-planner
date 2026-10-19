@@ -1344,6 +1344,28 @@ function wallOutlet(it, s, m) {
   return g;
 }
 
+// Extractor fan: square front panel standing just off a slim body, with the shutter recess behind it.
+// Wall-mounted faces +z; ceiling-mounted (cfg.mount 'ceiling') faces down with the top on the ceiling.
+function fan(it, s) {
+  const g = new THREE.Group();
+  const W = s.w * MM, H = s.h * MM, D = Math.max(0.02, s.d * MM);
+  const white = mat('#f6f6f4', { roughness: 0.35 });
+  const unit = new THREE.Group();
+  const body = new THREE.Mesh(new RoundedBoxGeometry(W * 0.93, H * 0.93, D * 0.55, 3, 0.006), white);
+  body.position.z = -D / 2 + D * 0.275; unit.add(body);
+  const face = new THREE.Mesh(new RoundedBoxGeometry(W, H, D * 0.32, 3, 0.004), white);
+  face.position.z = D / 2 - D * 0.16; unit.add(face);
+  // shadow gap between the face and the body (air is drawn in round the edges)
+  box(W * 0.94, H * 0.94, 0.002, MATS.dark, 0, 0, D / 2 - D * 0.33, unit);
+  // small logo
+  box(0.03, 0.005, 0.0008, mat('#2f5fae'), 0, -H * 0.36, D / 2 + 0.0004, unit);
+  if (it.cfg?.mount === 'ceiling') { unit.rotation.x = Math.PI / 2; unit.position.y = D / 2; }
+  else unit.position.y = H / 2;
+  g.add(unit);
+  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  return g;
+}
+
 // Wet room panel: wall channel on one edge (cfg.channel 'start' = local −x), 8 mm glass, and a straight
 // bracing bar from the top of the free end to the nearest wall on one side (cfg.brace 'auto' | 'front' | 'back').
 export function braceInfo(it) {
@@ -1438,6 +1460,7 @@ export function buildItem(it) {
     case 'falsewall': g = falseWall(it, s, m); break;
     case 'walltap': g = wallTap(it, s, m); break;
     case 'bathmixer': g = bathMixer(it, s); break;
+    case 'fan': g = fan(it, s); break;
     case 'showervalve': g = showerValve(it, s, m); break;
     case 'showerhead': g = showerHead(it, s, m); break;
     case 'towelholder': g = towelHolder(it, s, m); break;

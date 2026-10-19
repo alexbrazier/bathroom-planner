@@ -6,7 +6,6 @@ import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { v3 } from './view3d.js';
-import { MATS } from './models3d.js';
 import { store, modelOf, variantOf } from './state.js';
 
 function exportScene({ ceiling = false } = {}) {
@@ -29,13 +28,10 @@ function exportScene({ ceiling = false } = {}) {
   }
 
   // live mirror reflections → a plain mirror material (other apps have their own reflections)
+  // (each reflector has its plain mirror face next to it, hidden; the traverse below makes everything visible)
   const refl = [];
   root.traverse((o) => { if (o.isReflector) refl.push(o); });
-  for (const r of refl) {
-    const m = new THREE.Mesh(r.geometry, MATS.mirror);
-    m.position.copy(r.position); m.quaternion.copy(r.quaternion); m.scale.copy(r.scale); m.userData = { ...r.userData };
-    r.parent.add(m); r.parent.remove(r); r.getRenderTarget?.().dispose();
-  }
+  for (const r of refl) { r.parent.remove(r); r.getRenderTarget?.().dispose(); }
 
   const remove = [];
   root.traverse((o) => {

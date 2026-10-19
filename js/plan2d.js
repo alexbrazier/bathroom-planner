@@ -469,6 +469,17 @@ function drawItem(ctx, it, px) {
       ctx.beginPath(); ctx.arc(0, 0, 45, 0, Math.PI * 2); ctx.stroke();
       break;
     }
+    case 'fan': {
+      // extractor fan: square grille with a fan circle; dashed when it's on the ceiling
+      const ceil = it.cfg?.mount === 'ceiling';
+      ctx.fillStyle = '#ffffff';
+      if (ceil) ctx.setLineDash([5 * px, 3 * px]);
+      const fd = ceil ? s.h : d, fh = fd / 2; // on the ceiling the square face is what shows in plan
+      ctx.beginPath(); ctx.rect(-hw, -fh, w, fd); ctx.fill(); ctx.stroke();
+      if (ceil) { ctx.beginPath(); ctx.arc(0, 0, Math.min(hw, fh) * 0.6, 0, Math.PI * 2); ctx.stroke(); ctx.beginPath(); ctx.moveTo(-hw * 0.4, -fh * 0.4); ctx.lineTo(hw * 0.4, fh * 0.4); ctx.moveTo(hw * 0.4, -fh * 0.4); ctx.lineTo(-hw * 0.4, fh * 0.4); ctx.stroke(); }
+      ctx.setLineDash([]);
+      break;
+    }
     case 'wetpanel': case 'bathscreen': {
       const flip = it.cfg?.channel === 'end' ? -1 : 1;
       ctx.setLineDash([]);
@@ -548,7 +559,7 @@ function drawItem(ctx, it, px) {
   }
   ctx.setLineDash([]);
   // label
-  if (w * plan.scale > 50 && !['glass', 'mirror', 'walltap', 'showervalve', 'showerhead', 'falsewall', 'niche', 'wetpanel', 'bathscreen', 'towelholder', 'tap', 'handshower', 'showerrail', 'accessory', 'porterset', 'porter', 'walloutlet'].includes(m.kind)) {
+  if (w * plan.scale > 50 && !['glass', 'mirror', 'walltap', 'showervalve', 'showerhead', 'falsewall', 'niche', 'wetpanel', 'bathscreen', 'fan', 'towelholder', 'tap', 'handshower', 'showerrail', 'accessory', 'porterset', 'porter', 'walloutlet'].includes(m.kind)) {
     const sku = m.generic ? '' : it.custom ? 'MTM' : (m.sizes[it.size]?.variants[0]?.sku || '').split('-')[0];
     const lbl = `${sku ? sku + ' · ' : ''}${Math.round(w)}`;
     if (!(m.kind === 'vanity' && hasRider(it))) text(ctx, lbl, 0, m.kind === 'basin' ? hd - 25 : 0, px, { size: 10, color: '#3d444e', angle: readableAngle(rad(it.rot)) - rad(it.rot) });
