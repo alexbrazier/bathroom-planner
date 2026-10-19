@@ -1,0 +1,6 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "bathroom-designer-app", "runtimeExecutable": "python3", "runtimeArgs": ["/Users/alexbrazier/Code/ai/bathroom-designer/serve.py", "8137"], "port": 8137 }
+  ]
+}

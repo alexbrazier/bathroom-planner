@@ -1,0 +1,54 @@
+name: Deploy to Cloudflare Pages (manual)
+
+# Disabled for automatic runs — GitHub Pages (github-pages.yml) is the active deploy.
+# Can still be run by hand from the Actions tab once the Cloudflare secrets are set.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: cloudflare-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      # Override with a repository variable if you want a different project / *.pages.dev name
+      PROJECT_NAME: ${{ vars.CF_PAGES_PROJECT || 'bathroom-designer' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check secrets are set
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::error::Add CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in Settings → Secrets and variables → Actions"
+            exit 1
+          fi
+
+      - name: Assemble site
+        # Only the static app is published (no local server script, tools or editor config).
+        run: |
+          mkdir -p dist
+          cp -r index.html _headers css js data dist/
+          echo "Publishing $(find dist -type f | wc -l) files ($(du -sh dist | cut -f1))"
+
+      - name: Create Pages project (first run only)
+        run: npx --yes wrangler@4 pages project create "$PROJECT_NAME" --production-branch=main || echo "Project already exists"
+
+      - name: Deploy
+        run: >
+          npx --yes wrangler@4 pages deploy dist
+          --project-name="$PROJECT_NAME"
+          --branch="$GITHUB_REF_NAME"
+          --commit-hash="$GITHUB_SHA"
+          --commit-message="$(git log -1 --pretty=%s | head -c 200)"

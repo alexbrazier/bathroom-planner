@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Bathroom Designer</title>
+<link rel="stylesheet" href="css/app.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<header id="topbar">
+  <div class="brand">Bathroom Designer</div>
+  <div class="rooms">
+    <span id="projectName" class="proj" title="Click to rename project"></span>
+    <select id="roomSelect" title="Switch room"></select>
+    <div class="menu">
+      <button id="roomBtn" title="Manage rooms">Rooms ▾</button>
+      <div class="menu-pop" id="roomMenu">
+        <button data-room="new">Add blank room</button>
+        <div id="roomTpl"></div>
+        <button data-room="dup">Duplicate this room</button>
+        <button data-room="rename">Rename this room</button>
+        <button data-room="delete" class="danger">Delete this room</button>
+      </div>
+    </div>
+  </div>
+  <div class="seg" id="viewMode">
+    <button data-mode="2d" class="on">2D plan</button>
+    <button data-mode="split">Split</button>
+    <button data-mode="3d">3D</button>
+  </div>
+  <div class="tools">
+    <button id="toolSelect" class="on" title="Select / move (V)">Select</button>
+    <button id="toolMeasure" title="Measure distance (M)">Measure</button>
+    <button id="toolDraw" title="Draw room outline by clicking corners">Draw room</button>
+  </div>
+  <div class="spacer"></div>
+  <button id="undoBtn" title="Undo (Ctrl+Z)">Undo</button>
+  <button id="redoBtn" title="Redo (Ctrl+Shift+Z)">Redo</button>
+  <div class="menu">
+    <button id="shareBtn" title="Share a link to this design">Share ▾</button>
+    <div class="menu-pop" id="shareMenu">
+      <button data-share="room">Link to this room</button>
+      <button data-share="project">Link to whole project</button>
+    </div>
+  </div>
+  <button id="bomBtn">Parts list</button>
+  <div class="menu">
+    <button id="fileBtn">File ▾</button>
+    <div class="menu-pop" id="fileMenu">
+      <button id="newBtn">New project</button>
+      <button id="saveBtn">Save project (.json)</button>
+      <label class="as-btn">Open project…<input type="file" id="openInput" accept=".json,application/json" hidden></label>
+      <div class="menu-sep">This room</div>
+      <div id="tplMenu"></div>
+      <button id="pngBtn">Export 2D plan (.png)</button>
+      <button id="shotBtn">Export 3D view image (.png)</button>
+      <button id="glbBtn">Export 3D model (.glb) — Twinmotion, Blender, SketchUp</button>
+      <button id="objBtn">Export 3D model (.obj + .mtl)</button>
+      <label class="as-btn chk"><input type="checkbox" id="expCeiling"> Include ceiling in 3D export</label>
+    </div>
+  </div>
+</header>
+
+<div id="sharedBar" hidden>
+  <span><b>Shared design</b> — view only. Nothing here is saved unless you save a copy.</span>
+  <button id="sharedCopy" class="primary">Save a copy to my projects</button>
+  <button id="sharedClose">Close</button>
+</div>
+
+<main id="layout" class="mode-2d">
+  <aside id="library">
+    <div class="lib-head">
+      <input id="libSearch" type="search" placeholder="Search products…">
+      <select id="libBrand"></select>
+      <div id="libCats"></div>
+    </div>
+    <div id="libList"></div>
+    <div class="lib-foot">Drag onto the plan, or click to add. Data: Dansani Luna (dansani.co.uk, £); Villeroy &amp; Boch and hansgrohe (megabad.com, €).</div>
+  </aside>
+
+  <section id="views">
+    <div id="view2d" class="view">
+      <canvas id="plan"></canvas>
+      <div class="hud" id="hud2d"></div>
+      <div class="zoom">
+        <button id="zoomFit" title="Fit room (F)">Fit</button>
+        <button id="zoomIn">+</button>
+        <button id="zoomOut">−</button>
+      </div>
+    </div>
+    <div id="view3d" class="view">
+      <div class="hud3d">
+        <label><input type="checkbox" id="cutaway" checked> Cut away near walls</label>
+        <label><input type="checkbox" id="showCeiling"> Ceiling</label>
+        <button id="cam3dReset">Reset camera</button>
+        <button id="camEye" title="Stand in the room at eye height">Eye level</button>
+      </div>
+    </div>
+  </section>
+
+  <aside id="props"></aside>
+</main>
+
+<div id="bom" class="modal" hidden>
+  <div class="modal-card">
+    <div class="modal-head"><h2>Parts list</h2><button class="x" data-close>×</button></div>
+    <div id="bomBody"></div>
+  </div>
+</div>
+
+<div id="shareDlg" class="modal" hidden>
+  <div class="modal-card share-card">
+    <div class="modal-head"><h2>Share link</h2><button class="x" data-close>×</button></div>
+    <p class="note" id="shareWhat"></p>
+    <div class="share-row"><input id="shareUrl" type="text" readonly><button id="shareCopy" class="primary">Copy</button></div>
+    <p class="note">The design is packed into the link itself, so it's a snapshot: edits you make later need a new link.
+      Whoever opens it gets a view-only copy and can save their own copy.</p>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
