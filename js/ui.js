@@ -1,11 +1,12 @@
 // Library panel, properties panel and parts list.
 import { MODELS, CATS, catOf, byId, parsePrice, fmtPrice, currencyOf, BRANDS, colourPair, defaultElev, STACKS_ON, SUPPORTS } from './catalog.js';
-import { store, checkpoint, commit, select, modelOf, sizeOf, variantOf, cfgOf, priceOf, itemById, uid, defaultRoom, nicheOf, switchRoom } from './state.js';
+import { store, emit, checkpoint, commit, select, modelOf, sizeOf, variantOf, cfgOf, priceOf, itemById, uid, defaultRoom, nicheOf, switchRoom } from './state.js';
 import { wallsOf, polyBounds, normAngle, snap, pointInPoly, ceilingAt } from './geom.js';
 import { addModelAt, clearances, splitWall, removeVertex, plan, drawActions } from './plan2d.js';
 import { placeItem, ridersOf, applyRiders, findSupport } from './place.js';
 import { braceInfo, flushInfo, bathInfo } from './models3d.js';
 import { VIEWS, outsideOf } from './view3d.js';
+import { NOTE_TYPES, noteColor, notesOf, attachedTo, noteView } from './notes.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -133,6 +134,7 @@ export function renderProps() {
   if (s?.type === 'wall') return wallPanel(el, s.index);
   if (s?.type === 'vertex') return vertexPanel(el, s.index);
   if (s?.type === 'opening') { const op = store.d.openings.find((o) => o.id === s.id); if (op) return openingPanel(el, op); }
+  if (s?.type === 'note') { const n = notesOf().find((x) => x.id === s.id); if (n) return notePanel(el, n); }
   roomPanel(el);
 }
 
@@ -500,6 +502,38 @@ export function addOpening(type, wallIdx = 0, t = null) {
   }, 'room');
 }
 
+function notePanel(el, n) {
+  const ro = store.readOnly;
+  el.innerHTML = `
+    <h3><span class="note-dot" style="background:${noteColor(n)}">${n.n}</span> ${esc((NOTE_TYPES[n.type] || NOTE_TYPES.note).label)}${n.resolved ? ' · resolved' : ''}</h3>
+    <div class="sub">On ${esc(attachedTo(n, store.d, (it) => shortName(modelOf(it)?.name || 'a fitting')))}</div>
+    <textarea data-k="noteText" rows="4" placeholder="e.g. Window moved 300 mm left to clear the shower glass" ${ro ? 'readonly' : ''}>${esc(n.text)}</textarea>
+    ${ro ? '' : `<div class="grid2" style="margin-top:6px">
+      <div class="fld"><span>Type</span><select data-k="noteType">${Object.entries(NOTE_TYPES).map(([k, t]) => `<option value="${k}" ${n.type === k ? 'selected' : ''}>${t.label}</option>`).join('')}</select></div>
+      <div class="fld"><span>Resolved</span><label class="row" style="margin:0"><input type="checkbox" data-k="noteDone" ${n.resolved ? 'checked' : ''}> Done</label></div>
+    </div>
+    <div class="note" style="margin-top:6px">Drag the pin on the plan to move it — drop it on a fitting, door, window or wall and it follows that.</div>
+    <div class="btns"><button data-act="noteDel" class="danger">Delete note</button><button data-act="back">← Room</button></div>`}`;
+  bind(el, {
+    noteText: (v) => mutate(() => { n.text = v.trim(); }, 'notes'),
+    noteType: (v) => mutate(() => { n.type = v; }, 'notes'),
+    noteDone: (v) => mutate(() => { n.resolved = v; }, 'notes'),
+    noteDel: () => mutate(() => { store.d.notes = notesOf().filter((x) => x !== n); store.sel = null; }, 'notes'),
+    back: () => select(null),
+  });
+}
+
+function notesHtml() {
+  const list = notesOf();
+  const open = list.filter((n) => !n.resolved).length;
+  return `<h4>Notes${list.length ? ` (${open} open${list.length > open ? `, ${list.length - open} resolved` : ''})` : ''}</h4>
+    ${list.length ? `<div class="notes-list">${list.slice().sort((a, b) => (a.resolved - b.resolved) || a.n - b.n).map((n) => `
+      <button class="note-row ${n.resolved ? 'done' : ''}" data-act="noteGo" data-id="${n.id}"><span class="note-dot" style="background:${noteColor(n)}">${n.n}</span><span class="t">${esc(n.text || '(no text yet)')}</span></button>`).join('')}</div>` : ''}
+    <div class="row"><label>Show notes</label><input type="checkbox" data-k="notesShow" ${noteView.show ? 'checked' : ''}></div>
+    ${list.some((n) => n.resolved) ? `<div class="row"><label>Hide resolved</label><input type="checkbox" data-k="notesHideDone" ${noteView.hideResolved ? 'checked' : ''}></div>` : ''}
+    <div class="note">${store.readOnly ? 'Click a note to read it.' : 'Use the <b>Note</b> tool (N) and click on the plan to add one — on a fitting, door, window or wall it moves with it.'}</div>`;
+}
+
 function openingPanel(el, op) {
   const w = wallsOf(store.d.room.pts)[op.wall];
   el.innerHTML = `
@@ -548,6 +582,8 @@ function roomPanel(el) {
   el.innerHTML = `
     <h3>Room</h3>
     <div class="sub">${r.pts.length} walls · floor area ${(area(r.pts) / 1e6).toFixed(2)} m²</div>
+
+    ${notesHtml()}
 
     <h4>Quick shape</h4>
     <div class="grid2">
@@ -615,6 +651,9 @@ function roomPanel(el) {
     rect: () => { const W = +$('#props [data-k=rw]').value, L = +$('#props [data-k=rl]').value; if (W >= 300 && L >= 300) drawActions.preset('rect', W, L); },
     lshape: () => { const W = +$('#props [data-k=rw]').value, L = +$('#props [data-k=rl]').value; if (W >= 300 && L >= 300) drawActions.preset('L', W, L); },
     editRoom: () => document.getElementById('toolRoom')?.click(),
+    noteGo: (btn) => select({ type: 'note', id: btn.dataset.id }),
+    notesShow: (v) => { noteView.show = v; emit('notes-view'); },
+    notesHideDone: (v) => { noteView.hideResolved = v; emit('notes-view'); },
     paste: () => pasteClip(),
     drawRoom: () => document.getElementById('toolDraw')?.click(),
     height: (v) => R(() => { r.height = Math.max(1500, +v); }),

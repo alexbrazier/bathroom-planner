@@ -7,6 +7,7 @@ import { wallsOf, outerPts, polyBounds, toWorld, distToSeg, slopeOf, ceilingAt, 
 import { buildItem, boxGeo, mat, MATS, tileTexture, hasTapOn } from './models3d.js';
 import { placeItem, ridersOf, applyRiders } from './place.js';
 import { initVR, vrTick } from './vr.js';
+import { notesOf, noteAnchor, noteColor, noteView } from './notes.js';
 import { addReflections, disposeGroup as disposeItem, reflectionsOn, setReflections as setRefl, showReflections } from './mirrors.js';
 
 const MM = 0.001;
@@ -211,6 +212,46 @@ export function eyeLevel() {
   v3.controls.target.set(s.lookX, 1.2, s.lookZ);
   v3.camera.fov = 70; v3.camera.updateProjectionMatrix();
   v3.controls.update(); updateCutaway(); requestRender();
+}
+
+// ------------------------------------------------------------------ notes
+// A coloured pin at each note with a floating "n · text" label (also in VR). Rebuilt when notes or their anchors change.
+let notesGroup = null, notesKey = '';
+function noteLabel(n) {
+  const c = document.createElement('canvas'); c.width = 1024; c.height = 96;
+  const x = c.getContext('2d'), col = noteColor(n);
+  const t = (n.text || '').length > 34 ? n.text.slice(0, 33) + '…' : (n.text || '');
+  x.font = '600 40px system-ui, sans-serif';
+  const w = Math.min(1016, 110 + (t ? x.measureText(t).width + 28 : 0));
+  x.fillStyle = 'rgba(255,255,255,0.95)'; x.beginPath(); x.roundRect(4, 8, w, 80, 40); x.fill();
+  x.fillStyle = col; x.beginPath(); x.arc(48, 48, 34, 0, Math.PI * 2); x.fill();
+  x.fillStyle = '#fff'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(String(n.n), 48, 50);
+  x.textAlign = 'left'; x.fillStyle = n.resolved ? '#8c939b' : '#25292e'; x.fillText(t, 96, 50);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
+  sp.center.set(0, 0.5); sp.scale.set(0.06 * (c.width / c.height), 0.06, 1); sp.renderOrder = 30; // keep the canvas aspect
+  return sp;
+}
+function updateNotes() {
+  const d = store.d;
+  const list = noteView.show ? notesOf(d).filter((n) => !(noteView.hideResolved && n.resolved)) : [];
+  const anchors = list.map((n) => noteAnchor(n, d));
+  const key = JSON.stringify([list.map((n) => [n.id, n.n, n.text, n.type, n.resolved]), anchors.map((a) => [Math.round(a.x), Math.round(a.y), Math.round(a.z)])]);
+  if (key === notesKey && notesGroup) return;
+  notesKey = key;
+  if (notesGroup) { v3.scene.remove(notesGroup); notesGroup.traverse((o) => { o.geometry?.dispose(); o.material?.map?.dispose(); o.material?.dispose?.(); }); }
+  notesGroup = new THREE.Group();
+  list.forEach((n, i) => {
+    const a = anchors[i], col = noteColor(n);
+    const pin = new THREE.Group(); pin.position.set(a.x * MM, a.z * MM, a.y * MM);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.03, 20, 14), new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 0.35, roughness: 0.4 }));
+    head.position.y = 0.11; pin.add(head);
+    const stalk = new THREE.Mesh(new THREE.ConeGeometry(0.012, 0.09, 12), head.material); stalk.rotation.x = Math.PI; stalk.position.y = 0.06; pin.add(stalk);
+    const lab = noteLabel(n); lab.position.set(0.045, 0.11, 0); pin.add(lab);
+    notesGroup.add(pin);
+  });
+  v3.scene.add(notesGroup);
+  requestRender();
 }
 
 // ------------------------------------------------------------------ view outside the windows
@@ -628,6 +669,7 @@ export function rebuildItems() {
     g.rotation.y = -it.rot * Math.PI / 180;
   }
   for (const [id, g] of itemMeshes) if (!seen.has(id)) { itemGroup.remove(g); disposeItem(g); itemMeshes.delete(id); itemSig.delete(id); }
+  updateNotes();
   updateCutaway();
   updateSelection();
   requestRender();

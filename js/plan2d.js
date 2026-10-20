@@ -4,6 +4,7 @@ import { slopeOf, clipHalf, wallsOf, outerPts, distToSeg, pointInPoly, itemCorne
 import { ABOVE_FLOOR_DASHED, byId, STACKS_ON } from './catalog.js';
 import { placeItem, ridersOf, applyRiders, nearestWall } from './place.js';
 import { braceInfo, flushInfo, bathInfo } from './models3d.js';
+import { notesOf, noteAnchor, noteColor, newNote, moveNote, noteView } from './notes.js';
 
 const ACCENT = '#2f5d8a';
 const WALL = '#3b4048';
@@ -185,6 +186,9 @@ export function render(ctx, forExport) {
     const op = d.openings.find((o) => o.id === sel.id);
     if (op) { openingDims(ctx, op, walls, px); openingHandles(ctx, op, walls, px); }
   }
+  // notes (pins on top of everything; callout text for the selected/hovered one, or all of them in an export)
+  if (noteView.show) drawNotes(ctx, d, px, forExport);
+
   // pinned dimensions
   for (const dm of d.dims || []) {
     dimLine(ctx, dm.a, dm.b, px, '#7a4fb5', `${Math.round(Math.hypot(dm.b.x - dm.a.x, dm.b.y - dm.a.y))}`);
@@ -608,6 +612,52 @@ export function clearances(it) {
   return out;
 }
 
+// ---- notes
+function visibleNotes(d = store.d) { return notesOf(d).filter((n) => !(noteView.hideResolved && n.resolved)); }
+function noteAt(w, px) {
+  if (!noteView.show) return null;
+  const list = visibleNotes();
+  for (let i = list.length - 1; i >= 0; i--) {
+    const a = noteAnchor(list[i]);
+    if (Math.hypot(w.x - a.x, w.y - (a.y - 14 * px)) < 11 * px) return { type: 'note', id: list[i].id };
+  }
+  return null;
+}
+function wrapText(ctx, str, maxW) {
+  const words = String(str || '').split(/\s+/), lines = []; let line = '';
+  for (const wd of words) { const t = line ? line + ' ' + wd : wd; if (ctx.measureText(t).width > maxW && line) { lines.push(line); line = wd; } else line = t; }
+  if (line) lines.push(line);
+  return lines.slice(0, 6);
+}
+function drawNotes(ctx, d, px, forExport) {
+  const sel = store.sel?.type === 'note' ? store.sel.id : null, hov = plan.hover?.type === 'note' ? plan.hover.id : null;
+  for (const n of visibleNotes(d)) {
+    const a = noteAnchor(n, d);
+    if (n.on) n.at = { x: Math.round(a.x), y: Math.round(a.y) }; // remember where it was if its anchor goes away
+    const col = noteColor(n), r = 10 * px, cy = a.y - 14 * px;
+    // pin: circle with a point down to the anchor
+    ctx.save();
+    ctx.fillStyle = col; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2 * px;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(a.x - 6 * px, cy + 6 * px); ctx.arc(a.x, cy, r, Math.PI * 0.75, Math.PI * 0.25); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    if (n.id === sel) { ctx.strokeStyle = col; ctx.lineWidth = 2 * px; ctx.beginPath(); ctx.arc(a.x, cy, r + 4 * px, 0, Math.PI * 2); ctx.stroke(); }
+    ctx.restore();
+    text(ctx, String(n.n), a.x, cy + 0.5 * px, px, { color: '#fff', size: 11, weight: 700 });
+    if (!(forExport || n.id === sel || n.id === hov) || !n.text) continue;
+    // callout box to the right of the pin
+    ctx.save();
+    ctx.font = `${12 * px}px system-ui, sans-serif`;
+    const lines = wrapText(ctx, n.text, 220 * px), lh = 15 * px, bw = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 14 * px, bh = lines.length * lh + 10 * px;
+    const bx = a.x + 16 * px, by = cy - bh / 2;
+    ctx.fillStyle = 'rgba(255,255,255,0.96)'; ctx.strokeStyle = col; ctx.lineWidth = 1.5 * px;
+    ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 5 * px); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = col; ctx.fillRect(bx, by + 4 * px, 3 * px, bh - 8 * px);
+    ctx.fillStyle = n.resolved ? '#8c939b' : '#25292e'; ctx.textBaseline = 'top';
+    lines.forEach((l, i) => ctx.fillText(l, bx + 9 * px, by + 5 * px + i * lh));
+    ctx.restore();
+  }
+}
+
 function drawSelection(ctx, it, px) {
   const s = sizeOf(it);
   const corners = itemCorners(it, s.w, s.d);
@@ -667,6 +717,7 @@ function hitTest(w) {
   const px = 1 / plan.scale;
   const d = store.d;
   const sel = store.sel;
+  const nh = noteAt(w, px); if (nh) return nh;
   const room = plan.tool === 'room';
   if (room) {
     if (sel?.type === 'opening') {
@@ -753,6 +804,21 @@ function onDown(e) {
   if (plan.tool === 'draw') { drawClick(w, e); return; }
 
   const hit = hitTest(w);
+  if (hit?.type === 'note') {
+    select({ type: 'note', id: hit.id });
+    if (!store.readOnly) plan.drag = { type: 'note', note: notesOf().find((n) => n.id === hit.id), start: JSON.stringify(store.d), sx, sy, moved: false };
+    return;
+  }
+  if (plan.tool === 'note' && !store.readOnly) {
+    checkpoint();
+    const n = newNote(w);
+    store.sel = { type: 'note', id: n.id };
+    commit('notes');
+    // the side panel is rebuilt synchronously by commit, so the text box can take focus straight away
+    const focusText = () => document.querySelector('#props [data-k="noteText"]')?.focus();
+    focusText(); requestAnimationFrame(focusText);
+    return;
+  }
   if (store.readOnly) {
     // view-only: allow selecting to read sizes/clearances, never dragging
     if (hit && hit.type !== 'rotate' && hit.type !== 'opEnd') select(hit.type === 'item' || hit.type === 'opening' ? { type: hit.type, id: hit.id } : { type: hit.type, index: hit.index });
@@ -831,7 +897,7 @@ function onMove(e) {
     if (key !== plan.hoverKey) {
       plan.hover = h; plan.hoverKey = key;
       const resizeCursor = () => { const it = itemById(h.id); const a = ((it.rot + (h.axis === 'y' ? 90 : 0)) % 180 + 180) % 180; return a < 22.5 || a > 157.5 ? 'ew-resize' : a < 67.5 ? 'nwse-resize' : a < 112.5 ? 'ns-resize' : 'nesw-resize'; };
-      plan.canvas.style.cursor = !h ? (plan.tool === 'select' || plan.tool === 'room' ? 'default' : 'crosshair') : h.type === 'rotate' ? 'grab' : h.type === 'resize' ? resizeCursor() : h.type === 'opEnd' ? 'ew-resize' : h.type === 'vertex' ? 'crosshair' : 'move';
+      plan.canvas.style.cursor = !h ? (plan.tool === 'select' || plan.tool === 'room' ? 'default' : 'crosshair') : h.type === 'note' ? 'pointer' : h.type === 'rotate' ? 'grab' : h.type === 'resize' ? resizeCursor() : h.type === 'opEnd' ? 'ew-resize' : h.type === 'vertex' ? 'crosshair' : 'move';
       draw();
     }
     hud();
@@ -844,6 +910,12 @@ function onMove(e) {
       plan.ox = dg.ox + sx - dg.sx; plan.oy = dg.oy + sy - dg.sy; plan.userMoved = true;
       if (Math.hypot(sx - dg.sx, sy - dg.sy) > 3) dg.maybeClick = false;
       draw(); break;
+    case 'note': {
+      if (!dg.moved && Math.hypot(sx - dg.sx, sy - dg.sy) < 3) return;
+      dg.moved = true; dg.p = w;
+      dg.note.at = { x: w.x, y: w.y }; delete dg.note.on; // follows the pointer; re-attaches on drop
+      draw(); break;
+    }
     case 'measure':
       plan.measure.b = e.shiftKey ? w : snapToFeatures(w);
       hud(); draw(); break;
@@ -942,6 +1014,10 @@ function onUp(e) {
   plan.guides = [];
   hud();
   if (dg.type === 'measure') { plan.measure.done = true; draw(); return; }
+  if (dg.type === 'note') {
+    if (dg.moved) { moveNote(dg.note, dg.p); store.undo.push(dg.start); store.redo.length = 0; commit('notes'); }
+    draw(); return;
+  }
   if (['item', 'vertex', 'wall', 'opening', 'opEnd', 'rotate', 'resize'].includes(dg.type) && (dg.moved || dg.type === 'rotate')) {
     store.undo.push(dg.start); store.redo.length = 0;
     commit(dg.type === 'item' || dg.type === 'rotate' || dg.type === 'resize' ? 'items' : 'room');
@@ -1165,6 +1241,7 @@ function hud() {
   let s = '';
   if (plan.tool === 'draw') s = '';
   else if (plan.tool === 'measure') s = plan.measure?.b ? '' : 'Drag to measure — snaps to corners, fittings and walls (Shift = free)';
+  else if (plan.tool === 'note') s = 'Click to drop a note — on a fitting, door, window or wall it moves with it · drag a pin to move it';
   else if (plan.drag?.type === 'item') s = 'Hold Alt to place freely without snapping';
   else if (plan.tool === 'room') s = store.sel ? 'Drag walls or corners to reshape · drag a door/window along its wall, or its round handles to resize · double-click a wall to add a corner' : 'Editing the room — click a wall to add a door or window · fittings are locked';
   else if (c) s = `x ${Math.round(c.x)}  y ${Math.round(c.y)} mm`;

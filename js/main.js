@@ -1,11 +1,12 @@
 import { loadCatalog } from './catalog.js';
-import { store, on, load, undo, redo, select, itemById, newDesign, replaceDesign, checkpoint, commit, sizeOf, makeProject, asProject, loadProject, switchRoom, addRoom, renameRoom, deleteRoom, activeRoom, viewShared, leaveShared, listProjects, switchProject, renameProject, duplicateProject, deleteProject, moveRoom } from './state.js';
+import { store, on, emit, load, undo, redo, select, itemById, newDesign, replaceDesign, checkpoint, commit, sizeOf, makeProject, asProject, loadProject, switchRoom, addRoom, renameRoom, deleteRoom, activeRoom, viewShared, leaveShared, listProjects, switchProject, renameProject, duplicateProject, deleteProject, moveRoom } from './state.js';
 import { shareUrl, sharedToken, resolveShared, publishLive, linkFor, forgetLink, checkEditKey, rememberLink, liveLinks } from './share.js';
 import { exportGLB, exportOBJ } from './export3d.js';
 import { initPlan, draw, fit, zoom, setTool, drawKey, exportPNG, addModelAt, plan } from './plan2d.js';
 import { enterVR, vrSupported } from './vr.js';
 import { init3d, rebuildRoom, rebuildItems, updateSelection, onShow, resetCamera, eyeLevel, setCutaway, setCeiling, setReflections, screenshot } from './view3d.js';
 import { reflectionsOn } from './mirrors.js';
+import { noteView } from './notes.js';
 import { initLibrary, renderLibrary, renderProps, showBOM, rotateItem, deleteItem, duplicateItem, copyItem, pasteClip, hasClip, toast } from './ui.js';
 import { ridersOf, applyRiders } from './place.js';
 import { initOverlays } from './overlays.js';
@@ -40,6 +41,7 @@ async function main() {
     $('#propsToggle').classList.toggle('has-sel', !!store.sel);
     if (kind === 'select') { draw(); updateSelection(); renderProps(); return; }
     if (kind === 'tool') { syncTools(); return; }
+    if (kind === 'notes-view') $('#notes3d').checked = noteView.show;
     if (kind === 'room' || kind === 'load') rebuildRoom();
     if (kind !== 'select' && kind !== 'tool') renderLibrary(); // "used in project" badges
     rebuildItems();
@@ -257,7 +259,7 @@ async function main() {
   window.__togglePanel = togglePanel;
 
   // tools
-  const tools = { toolSelect: 'select', toolRoom: 'room', toolMeasure: 'measure', toolDraw: 'draw' };
+  const tools = { toolSelect: 'select', toolRoom: 'room', toolMeasure: 'measure', toolNote: 'note', toolDraw: 'draw' };
   // Edit room / Measure / Draw room work on the 2D plan: from 3D-only, switch to Split so you can see them.
   const useTool = (t) => {
     const next = plan.tool === t && t !== 'select' ? (t === 'draw' ? 'room' : 'select') : t;
@@ -278,6 +280,7 @@ async function main() {
   $('#showCeiling').onchange = (e) => setCeiling(e.target.checked);
   $('#reflections').checked = reflectionsOn();
   $('#reflections').onchange = (e) => setReflections(e.target.checked);
+  $('#notes3d').onchange = (e) => { noteView.show = e.target.checked; emit('notes-view'); };
   $('#cam3dReset').onclick = resetCamera;
   $('#camEye').onclick = eyeLevel;
   vrSupported().then((ok) => { $('#enterVR').hidden = !ok; });
@@ -333,8 +336,12 @@ async function main() {
     if (e.key === 'v' || e.key === 'V') useTool('select');
     if (e.key === 'e' || e.key === 'E') useTool(plan.tool === 'room' ? 'select' : 'room');
     if (e.key === 'm' || e.key === 'M') useTool('measure');
+    if ((e.key === 'n' || e.key === 'N') && !store.readOnly) useTool('note');
     if (e.key === 'f' || e.key === 'F') fit();
     if (!it) {
+      if ((e.key === 'Delete' || e.key === 'Backspace') && store.sel?.type === 'note') {
+        checkpoint(); store.d.notes = (store.d.notes || []).filter((n) => n.id !== store.sel.id); store.sel = null; commit('notes'); return;
+      }
       if ((e.key === 'Delete' || e.key === 'Backspace') && store.sel?.type === 'opening') {
         checkpoint(); store.d.openings = store.d.openings.filter((o) => o.id !== store.sel.id); store.sel = null; commit('room');
       }
@@ -357,7 +364,7 @@ async function main() {
 }
 
 // Shared (view-only) mode: banner, and hide anything that edits or saves.
-const RO_HIDE = ['#undoBtn', '#redoBtn', '#roomBtn', '#projBtn', '#toolDraw', '#newBtn', '#saveBtn', '#tplMenu'];
+const RO_HIDE = ['#undoBtn', '#redoBtn', '#roomBtn', '#projBtn', '#toolNote', '#toolDraw', '#newBtn', '#saveBtn', '#tplMenu'];
 function syncReadOnly() {
   const ro = store.readOnly;
   document.body.classList.toggle('readonly', ro);

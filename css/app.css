@@ -228,3 +228,11 @@ button.proj { background: none; border: 0; font: inherit; font-weight: 600; }
 #projMenu button.on { font-weight: 600; }
 .menu-pop .muted { color: var(--muted); font-weight: 400; }
 .menu-note { font-size: 12px; color: var(--muted); padding: 4px 12px 6px; }
+
+.note-dot { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px; color: #fff; font-size: 11px; font-weight: 700; vertical-align: middle; flex: none; }
+#props textarea[data-k="noteText"] { width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; padding: 8px; border: 1px solid var(--line); border-radius: 6px; resize: vertical; margin-top: 6px; }
+.notes-list { display: flex; flex-direction: column; gap: 2px; margin: 4px 0 6px; }
+.note-row { display: flex; align-items: center; gap: 8px; text-align: left; background: none; border: 1px solid transparent; border-radius: 6px; padding: 4px 6px; font-size: 12.5px; cursor: pointer; }
+.note-row:hover { background: var(--accent-soft); }
+.note-row .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.note-row.done .t { color: var(--muted); text-decoration: line-through; }
