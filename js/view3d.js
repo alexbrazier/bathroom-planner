@@ -62,6 +62,7 @@ export function init3d(container, { onDropModel }) {
   new ResizeObserver(() => resize()).observe(container);
   resize();
   resetCamera();
+  applySceneTheme();
   rebuildRoom(); rebuildItems();
 
   // picking & dragging
@@ -176,6 +177,13 @@ export function init3d(container, { onDropModel }) {
 }
 
 export function requestRender() { v3.dirty = true; }
+// Background follows the light/dark theme (CSS --view3d).
+export function applySceneTheme() {
+  if (!v3.ready) return;
+  const c = getComputedStyle(document.documentElement).getPropertyValue('--view3d').trim() || '#dfe3e8';
+  v3.scene.background = new THREE.Color(c);
+  requestRender();
+}
 
 function resize() {
   const { container, renderer, camera } = v3;

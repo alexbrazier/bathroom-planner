@@ -9,6 +9,13 @@ import { notesOf, noteAnchor, noteColor, newNote, moveNote, noteView } from './n
 const ACCENT = '#2f5d8a';
 const WALL = '#3b4048';
 const DIM = '#5b6470';
+// Room colours follow the light/dark theme (CSS variables --plan-*); fittings keep their real colours.
+const TH = { bg: '#fbfbfa', floor: '#f3f1ec', wall: WALL, dim: DIM, tile: 'rgba(0,0,0,0.06)', grid1: 'rgba(0,0,0,0.035)', grid2: 'rgba(0,0,0,0.08)', labelBg: 'rgba(251,251,250,0.92)' };
+export function applyPlanTheme() {
+  const cs = getComputedStyle(document.documentElement), v = (k, d) => cs.getPropertyValue(k).trim() || d;
+  Object.assign(TH, { bg: v('--plan-bg', TH.bg), floor: v('--plan-floor', TH.floor), wall: v('--plan-wall', TH.wall), dim: v('--plan-dim', TH.dim), tile: v('--plan-tile', TH.tile), grid1: v('--plan-grid', TH.grid1), grid2: v('--plan-grid-major', TH.grid2), labelBg: v('--plan-label-bg', TH.labelBg) });
+  draw();
+}
 
 export const plan = {
   canvas: null, ctx: null, dpr: 1,
@@ -29,6 +36,7 @@ const S2W = (x, y) => ({ x: (x - plan.ox) / plan.scale, y: (y - plan.oy) / plan.
 
 export function initPlan(canvas, hud) {
   plan.canvas = canvas; plan.ctx = canvas.getContext('2d'); plan.hud = hud;
+  applyPlanTheme();
   new ResizeObserver(() => resize()).observe(canvas.parentElement);
   canvas.addEventListener('pointerdown', onDown);
   canvas.addEventListener('pointermove', onMove);
@@ -97,7 +105,7 @@ export function render(ctx, forExport) {
   const { dpr } = plan;
   const d = store.d;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.fillStyle = '#fbfbfa';
+  ctx.fillStyle = TH.bg;
   ctx.fillRect(0, 0, plan.canvas.width, plan.canvas.height);
   ctx.setTransform(dpr * plan.scale, 0, 0, dpr * plan.scale, dpr * plan.ox, dpr * plan.oy);
   const px = 1 / plan.scale; // one screen pixel in mm
@@ -108,13 +116,13 @@ export function render(ctx, forExport) {
 
   // floor
   ctx.beginPath(); pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); ctx.closePath();
-  ctx.fillStyle = '#f3f1ec'; ctx.fill();
+  ctx.fillStyle = TH.floor; ctx.fill();
   // floor tile grid
   ctx.save(); ctx.clip();
   const b = polyBounds(pts);
   const ft = d.room.floor;
   if (ft.tw * plan.scale > 6) {
-    ctx.strokeStyle = 'rgba(0,0,0,0.06)'; ctx.lineWidth = px;
+    ctx.strokeStyle = TH.tile; ctx.lineWidth = px;
     ctx.beginPath();
     for (let x = b.x0; x <= b.x1; x += ft.tw) { ctx.moveTo(x, b.y0); ctx.lineTo(x, b.y1); }
     for (let y = b.y0; y <= b.y1; y += ft.th) { ctx.moveTo(b.x0, y); ctx.lineTo(b.x1, y); }
@@ -148,7 +156,7 @@ export function render(ctx, forExport) {
   ctx.beginPath();
   outer.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); ctx.closePath();
   pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); ctx.closePath();
-  ctx.fillStyle = WALL; ctx.fill('evenodd');
+  ctx.fillStyle = TH.wall; ctx.fill('evenodd');
 
   // openings
   for (const op of d.openings) drawOpening(ctx, op, walls, px);
@@ -219,7 +227,7 @@ export function render(ctx, forExport) {
 function drawGrid(ctx, px) {
   const x0 = -plan.ox / plan.scale, y0 = -plan.oy / plan.scale;
   const x1 = x0 + plan.w / plan.scale, y1 = y0 + plan.h / plan.scale;
-  const steps = [[100, 'rgba(0,0,0,0.035)'], [1000, 'rgba(0,0,0,0.08)']];
+  const steps = [[100, TH.grid1], [1000, TH.grid2]];
   for (const [st, col] of steps) {
     if (st * plan.scale < 6) continue;
     ctx.strokeStyle = col; ctx.lineWidth = px; ctx.beginPath();
@@ -274,7 +282,7 @@ function readableAngle(a) {
   return a;
 }
 
-function dimLine(ctx, a, b, px, color = DIM, label, offsetPx = 0) {
+function dimLine(ctx, a, b, px, color = TH.dim, label, offsetPx = 0) {
   const dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy);
   if (L < 1) return;
   const ux = dx / L, uy = dy / L, nx = -uy, ny = ux;
@@ -285,7 +293,7 @@ function dimLine(ctx, a, b, px, color = DIM, label, offsetPx = 0) {
   const t = 4 * px;
   for (const P of [A, B]) { ctx.moveTo(P.x + (nx + ux) * t, P.y + (ny + uy) * t); ctx.lineTo(P.x - (nx + ux) * t, P.y - (ny + uy) * t); }
   ctx.stroke();
-  if (label != null) text(ctx, label, (A.x + B.x) / 2, (A.y + B.y) / 2, px, { color, bg: 'rgba(251,251,250,0.92)', angle: readableAngle(Math.atan2(dy, dx)) });
+  if (label != null) text(ctx, label, (A.x + B.x) / 2, (A.y + B.y) / 2, px, { color, bg: TH.labelBg, angle: readableAngle(Math.atan2(dy, dx)) });
 }
 
 function wallDim(ctx, w, th, px) {
@@ -295,7 +303,7 @@ function wallDim(ctx, w, th, px) {
   ctx.beginPath(); ctx.moveTo(w.a.x - w.nx * th, w.a.y - w.ny * th); ctx.lineTo(a.x - w.nx * 5 * px, a.y - w.ny * 5 * px);
   ctx.moveTo(w.b.x - w.nx * th, w.b.y - w.ny * th); ctx.lineTo(b.x - w.nx * 5 * px, b.y - w.ny * 5 * px); ctx.stroke();
   const sel = store.sel?.type === 'wall' && store.sel.index === w.i;
-  dimLine(ctx, a, b, px, sel ? ACCENT : DIM, `${Math.round(w.len)}`);
+  dimLine(ctx, a, b, px, sel ? ACCENT : TH.dim, `${Math.round(w.len)}`);
 }
 
 function drawOpening(ctx, op, walls, px) {
@@ -304,7 +312,7 @@ function drawOpening(ctx, op, walls, px) {
   const p0 = { x: w.a.x + w.ux * op.offset, y: w.a.y + w.uy * op.offset };
   const p1 = { x: p0.x + w.ux * op.width, y: p0.y + w.uy * op.width };
   // clear the wall
-  ctx.fillStyle = '#f3f1ec';
+  ctx.fillStyle = TH.floor;
   ctx.beginPath();
   ctx.moveTo(p0.x + w.nx * 1, p0.y + w.ny * 1); ctx.lineTo(p1.x + w.nx * 1, p1.y + w.ny * 1);
   ctx.lineTo(p1.x - w.nx * (th + 1), p1.y - w.ny * (th + 1)); ctx.lineTo(p0.x - w.nx * (th + 1), p0.y - w.ny * (th + 1)); ctx.closePath(); ctx.fill();
@@ -690,7 +698,7 @@ function drawSelection(ctx, it, px) {
       ctx.restore();
     }
   }
-  text(ctx, `${Math.round(s.w)} × ${Math.round(s.d)}${it.elev ? ` · ↑${Math.round(it.elev)}` : ''}`, l(0, -s.d / 2 - 14 * px).x, l(0, -s.d / 2 - 14 * px).y, px, { color: ACCENT, bg: 'rgba(255,255,255,0.9)', angle: readableAngle(rad(it.rot)) });
+  text(ctx, `${Math.round(s.w)} × ${Math.round(s.d)}${it.elev ? ` · ↑${Math.round(it.elev)}` : ''}`, l(0, -s.d / 2 - 14 * px).x, l(0, -s.d / 2 - 14 * px).y, px, { color: ACCENT, bg: TH.labelBg, angle: readableAngle(rad(it.rot)) });
 }
 
 function drawRoomPreview(ctx, px) {
@@ -1255,8 +1263,12 @@ export function exportPNG() {
   const pad = 400;
   c.width = (b.w + pad * 2) * scale; c.height = (b.h + pad * 2) * scale;
   const saved = { scale: plan.scale, ox: plan.ox, oy: plan.oy, dpr: plan.dpr, canvas: plan.canvas };
+  // exports are for printing/sharing: always the light palette
+  const savedTheme = { ...TH };
+  Object.assign(TH, { bg: '#fbfbfa', floor: '#f3f1ec', wall: WALL, dim: DIM, tile: 'rgba(0,0,0,0.06)', grid1: 'rgba(0,0,0,0.035)', grid2: 'rgba(0,0,0,0.08)', labelBg: 'rgba(251,251,250,0.92)' });
   Object.assign(plan, { scale, ox: (pad - b.x0) * scale, oy: (pad - b.y0) * scale, dpr: 1, canvas: c });
   render(c.getContext('2d'), true);
   Object.assign(plan, saved);
+  Object.assign(TH, savedTheme);
   return c.toDataURL('image/png');
 }

@@ -2,9 +2,9 @@ import { loadCatalog } from './catalog.js';
 import { store, on, emit, load, undo, redo, select, itemById, newDesign, replaceDesign, checkpoint, commit, sizeOf, makeProject, asProject, loadProject, switchRoom, addRoom, renameRoom, deleteRoom, activeRoom, viewShared, leaveShared, listProjects, switchProject, renameProject, duplicateProject, deleteProject, moveRoom } from './state.js';
 import { shareUrl, sharedToken, resolveShared, publishLive, linkFor, forgetLink, checkEditKey, rememberLink, liveLinks } from './share.js';
 import { exportGLB, exportOBJ } from './export3d.js';
-import { initPlan, draw, fit, zoom, setTool, drawKey, exportPNG, addModelAt, plan } from './plan2d.js';
+import { initPlan, draw, fit, zoom, setTool, drawKey, exportPNG, addModelAt, plan, applyPlanTheme } from './plan2d.js';
 import { enterVR, vrSupported } from './vr.js';
-import { init3d, rebuildRoom, rebuildItems, updateSelection, onShow, resetCamera, eyeLevel, setCutaway, setCeiling, setReflections, screenshot } from './view3d.js';
+import { init3d, rebuildRoom, rebuildItems, updateSelection, onShow, resetCamera, eyeLevel, setCutaway, setCeiling, setReflections, screenshot, applySceneTheme } from './view3d.js';
 import { reflectionsOn } from './mirrors.js';
 import { noteView } from './notes.js';
 import { initLibrary, renderLibrary, renderProps, showBOM, rotateItem, deleteItem, duplicateItem, copyItem, pasteClip, hasClip, toast } from './ui.js';
@@ -280,6 +280,22 @@ async function main() {
   $('#showCeiling').onchange = (e) => setCeiling(e.target.checked);
   $('#reflections').checked = reflectionsOn();
   $('#reflections').onchange = (e) => setReflections(e.target.checked);
+  // theme: Auto (system) → Dark → Light
+  const THEME_KEY = 'bathroom-designer:theme', themeLabel = { auto: 'Auto (follows your system)', dark: 'Dark', light: 'Light' };
+  const getTheme = () => { try { return localStorage.getItem(THEME_KEY) || 'auto'; } catch { return 'auto'; } };
+  const applyTheme = (t) => {
+    if (t === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
+    $('#themeBtn').title = `Theme: ${themeLabel[t]} — click to change`;
+    $('#themeBtn').textContent = { auto: '◐', dark: '☾', light: '☀' }[t];
+    applyPlanTheme(); applySceneTheme();
+  };
+  $('#themeBtn').onclick = () => {
+    const t = { auto: 'dark', dark: 'light', light: 'auto' }[getTheme()];
+    try { localStorage.setItem(THEME_KEY, t); } catch { /* ignore */ }
+    applyTheme(t); toast(`Theme: ${themeLabel[t]}`);
+  };
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (getTheme() === 'auto') applyTheme('auto'); });
+  applyTheme(getTheme());
   $('#notes3d').onchange = (e) => { noteView.show = e.target.checked; emit('notes-view'); };
   $('#cam3dReset').onclick = resetCamera;
   $('#camEye').onclick = eyeLevel;
