@@ -1,6 +1,6 @@
 // 2D plan editor on a <canvas>. World units: mm.
 import { store, emit, checkpoint, commit, select, sizeOf, modelOf, coloursOf, cfgOf, itemById, makeItem, uid, nicheOf } from './state.js';
-import { slopeOf, clipHalf, wallsOf, outerPts, distToSeg, pointInPoly, itemCorners, toLocal, rayToWalls, polyBounds, snap, rad, deg, normAngle, signedArea } from './geom.js';
+import { slopeOf, clipHalf, wallsOf, outerPts, distToSeg, pointInPoly, itemCorners, toLocal, toWorld, rayToWalls, polyBounds, snap, rad, deg, normAngle, signedArea } from './geom.js';
 import { ABOVE_FLOOR_DASHED, byId, STACKS_ON } from './catalog.js';
 import { placeItem, ridersOf, applyRiders, nearestWall } from './place.js';
 import { braceInfo, flushInfo, bathInfo } from './models3d.js';
@@ -571,6 +571,20 @@ function drawItem(ctx, it, px) {
 
 function hasRider(it) { return ridersOf(it).length > 0; }
 
+// Custom-size items (boxing, built-out walls, niches, made-to-measure units, baths, trays…) can be resized by
+// dragging an edge handle; the opposite edge stays put.
+function resizable(it) {
+  const m = modelOf(it);
+  return !!m && !store.readOnly && (!!it.custom || (m.custom && m.generic));
+}
+function resizeHandles(it) {
+  const s = sizeOf(it);
+  return [['x', 1], ['x', -1], ['y', 1], ['y', -1]].map(([axis, sign]) => {
+    const p = toWorld(it, axis === 'x' ? sign * s.w / 2 : 0, axis === 'y' ? sign * s.d / 2 : 0);
+    return { axis, sign, x: p.x, y: p.y };
+  });
+}
+
 function rotHandlePos(it) {
   const s = sizeOf(it);
   const off = s.d / 2 + 28 / plan.scale;
@@ -615,6 +629,16 @@ function drawSelection(ctx, it, px) {
   const f = l(0, s.d / 2);
   ctx.strokeStyle = ACCENT; ctx.lineWidth = px; ctx.beginPath(); ctx.moveTo(f.x, f.y); ctx.lineTo(h.x, h.y); ctx.stroke();
   ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(h.x, h.y, 6 * px, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  if (resizable(it)) {
+    // edge handles: small squares turned with the item
+    for (const rh of resizeHandles(it)) {
+      ctx.save(); ctx.translate(rh.x, rh.y); ctx.rotate(rad(it.rot));
+      const hs = 4.5 * px, act = plan.drag?.type === 'resize' && plan.drag.axis === rh.axis && plan.drag.sign === rh.sign;
+      ctx.fillStyle = act ? ACCENT : '#fff'; ctx.strokeStyle = ACCENT; ctx.lineWidth = 1.5 * px;
+      ctx.fillRect(-hs, -hs, 2 * hs, 2 * hs); ctx.strokeRect(-hs, -hs, 2 * hs, 2 * hs);
+      ctx.restore();
+    }
+  }
   text(ctx, `${Math.round(s.w)} × ${Math.round(s.d)}${it.elev ? ` · ↑${Math.round(it.elev)}` : ''}`, l(0, -s.d / 2 - 14 * px).x, l(0, -s.d / 2 - 14 * px).y, px, { color: ACCENT, bg: 'rgba(255,255,255,0.9)', angle: readableAngle(rad(it.rot)) });
 }
 
@@ -652,6 +676,7 @@ function hitTest(w) {
   if (!room && sel?.type === 'item') {
     const it = itemById(sel.id);
     if (it) { const h = rotHandlePos(it); if (Math.hypot(w.x - h.x, w.y - h.y) < 9 * px) return { type: 'rotate', id: it.id }; }
+    if (it && resizable(it)) for (const h of resizeHandles(it)) if (Math.hypot(w.x - h.x, w.y - h.y) < 8 * px) return { type: 'resize', id: it.id, axis: h.axis, sign: h.sign };
   }
   const walls = wallsOf(d.room.pts);
   if (room) {
@@ -745,6 +770,11 @@ function onDown(e) {
     plan.drag = { type: 'rotate', it, start: JSON.stringify(d), riders: ridersOf(it) };
     return;
   }
+  if (hit.type === 'resize') {
+    const it = itemById(hit.id); const s0 = sizeOf(it);
+    plan.drag = { type: 'resize', it, axis: hit.axis, sign: hit.sign, start: JSON.stringify(d), frame: { x: it.x, y: it.y, rot: it.rot }, w0: s0.w, d0: s0.d, h0: s0.h, riders: ridersOf(it), moved: false };
+    return;
+  }
   if (hit.type === 'item') {
     const it = itemById(hit.id);
     if (e.altKey && e.shiftKey === false && e.metaKey === false && e.ctrlKey === false && false) return;
@@ -799,7 +829,8 @@ function onMove(e) {
     const key = JSON.stringify(h);
     if (key !== plan.hoverKey) {
       plan.hover = h; plan.hoverKey = key;
-      plan.canvas.style.cursor = !h ? (plan.tool === 'select' || plan.tool === 'room' ? 'default' : 'crosshair') : h.type === 'rotate' ? 'grab' : h.type === 'opEnd' ? 'ew-resize' : h.type === 'vertex' ? 'crosshair' : 'move';
+      const resizeCursor = () => { const it = itemById(h.id); const a = ((it.rot + (h.axis === 'y' ? 90 : 0)) % 180 + 180) % 180; return a < 22.5 || a > 157.5 ? 'ew-resize' : a < 67.5 ? 'nwse-resize' : a < 112.5 ? 'ns-resize' : 'nesw-resize'; };
+      plan.canvas.style.cursor = !h ? (plan.tool === 'select' || plan.tool === 'room' ? 'default' : 'crosshair') : h.type === 'rotate' ? 'grab' : h.type === 'resize' ? resizeCursor() : h.type === 'opEnd' ? 'ew-resize' : h.type === 'vertex' ? 'crosshair' : 'move';
       draw();
     }
     hud();
@@ -821,6 +852,30 @@ function onMove(e) {
       const it = dg.it;
       const p = { x: w.x - dg.off.x, y: w.y - dg.off.y };
       plan.guides = placeItem(it, p, { free: e.altKey, tol: 10 * px });
+      applyRiders(it, dg.riders);
+      emit('live'); draw(); hud(); break;
+    }
+    case 'resize': {
+      const it = dg.it, fr = dg.frame, ax = dg.axis, sg = dg.sign;
+      if (!it.custom) it.custom = { w: dg.w0, d: dg.d0, h: dg.h0 };
+      dg.moved = true;
+      const l = toLocal(fr, w);
+      const size0 = ax === 'x' ? dg.w0 : dg.d0;
+      const fixed = -sg * size0 / 2;                       // the edge that stays put (local)
+      let size = sg * ((ax === 'x' ? l.x : l.y) - fixed);
+      if (!e.altKey) {
+        size = Math.round(size / 10) * 10;
+        // snap the moving edge onto a wall face if it's close
+        const fixedW = toWorld(fr, ax === 'x' ? fixed : 0, ax === 'y' ? fixed : 0);
+        const tip = toWorld(fr, ax === 'x' ? fixed + sg : 0, ax === 'y' ? fixed + sg : 0);
+        const toWall = rayToWalls(fixedW, { x: tip.x - fixedW.x, y: tip.y - fixedW.y }, d.room.pts);
+        if (toWall != null && Math.abs(toWall - size) < 12 * px) size = Math.round(toWall);
+      }
+      size = Math.max(ax === 'x' ? 50 : 5, size);
+      const mid = fixed + sg * size / 2;
+      const c = toWorld(fr, ax === 'x' ? mid : 0, ax === 'y' ? mid : 0);
+      if (ax === 'x') it.custom.w = size; else it.custom.d = size;
+      it.x = c.x; it.y = c.y;
       applyRiders(it, dg.riders);
       emit('live'); draw(); hud(); break;
     }
@@ -886,9 +941,9 @@ function onUp(e) {
   plan.guides = [];
   hud();
   if (dg.type === 'measure') { plan.measure.done = true; draw(); return; }
-  if (['item', 'vertex', 'wall', 'opening', 'opEnd', 'rotate'].includes(dg.type) && (dg.moved || dg.type === 'rotate')) {
+  if (['item', 'vertex', 'wall', 'opening', 'opEnd', 'rotate', 'resize'].includes(dg.type) && (dg.moved || dg.type === 'rotate')) {
     store.undo.push(dg.start); store.redo.length = 0;
-    commit(dg.type === 'item' || dg.type === 'rotate' ? 'items' : 'room');
+    commit(dg.type === 'item' || dg.type === 'rotate' || dg.type === 'resize' ? 'items' : 'room');
   }
   draw();
 }

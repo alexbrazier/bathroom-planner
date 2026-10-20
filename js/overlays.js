@@ -41,7 +41,9 @@ function sync() {
   const walls = wallsOf(d.room.pts);
   const wall = tool === 'room' && s?.type === 'wall' ? walls[s.index] : null;
   const op = tool === 'room' && s?.type === 'opening' ? d.openings.find((o) => o.id === s.id) : null;
-  const key = JSON.stringify([tool, s, ro, wall && Math.round(wall.len), op, plan.drawPts?.length, !!plan.measure?.done, (d.dims || []).length]);
+  // !!plan.drag is part of the key: bars are hidden while dragging (including the press that selects a door/window),
+  // so they must rebuild once the pointer is released, or they'd keep showing the previous selection.
+  const key = JSON.stringify([tool, s, ro, wall && Math.round(wall.len), op, plan.drawPts?.length, !!plan.measure?.done, (d.dims || []).length, !!plan.drag]);
   // Don't rebuild a bar under the user's cursor while they type — unless the selection itself changed (then the
   // bar must show the new wall/door/window, and the half-typed field belongs to the old one).
   const target = JSON.stringify([tool, s?.type, s?.id, s?.index]);

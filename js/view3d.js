@@ -127,9 +127,42 @@ export function init3d(container, { onDropModel }) {
     if (id && fp) onDropModel(id, fp, e.altKey);
   });
 
+  // WASD / QE walking: active while the pointer is over the 3D view, or the 3D view fills the screen.
+  // Moves the camera and its orbit target together, level with the floor (Q/E go down/up); Shift = faster.
+  const keys = new Set();
+  const walkKeys = { KeyW: 1, KeyA: 1, KeyS: 1, KeyD: 1, KeyQ: 1, KeyE: 1 };
+  renderer.domElement.addEventListener('pointerenter', () => { v3.hover = true; });
+  renderer.domElement.addEventListener('pointerleave', () => { v3.hover = false; });
+  const walkActive = () => v3.hover || document.getElementById('layout')?.classList.contains('mode-3d');
+  window.addEventListener('keydown', (e) => {
+    if (!walkKeys[e.code] || e.metaKey || e.ctrlKey || e.altKey || e.target.closest?.('input, select, textarea') || !walkActive() || renderer.xr.isPresenting) return;
+    keys.add(e.code); v3.walkFast = e.shiftKey;
+    e.preventDefault(); e.stopImmediatePropagation(); // E would otherwise toggle Edit room
+  });
+  window.addEventListener('keyup', (e) => { keys.delete(e.code); v3.walkFast = e.shiftKey; });
+  window.addEventListener('blur', () => keys.clear());
+  let lastT = performance.now();
+  const fwd = new THREE.Vector3(), right = new THREE.Vector3(), move = new THREE.Vector3();
+  const walk = (dt) => {
+    const k = (c) => (keys.has(c) ? 1 : 0);
+    const f = k('KeyW') - k('KeyS'), r = k('KeyD') - k('KeyA'), u = k('KeyE') - k('KeyQ');
+    if (!f && !r && !u) return false;
+    camera.getWorldDirection(fwd); fwd.y = 0;
+    if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, -1); // looking straight down: walk "up" the screen
+    fwd.normalize();
+    right.crossVectors(fwd, camera.up).normalize();
+    const speed = (v3.walkFast ? 3.5 : 1.4) * Math.min(dt, 0.1);
+    move.set(0, 0, 0).addScaledVector(fwd, f * speed).addScaledVector(right, r * speed);
+    move.y += u * speed * 0.8;
+    camera.position.add(move); controls.target.add(move);
+    return true;
+  };
+
   renderer.setAnimationLoop(() => {
+    const now = performance.now(), dt = (now - lastT) / 1000; lastT = now;
     if (renderer.xr.isPresenting) { vrTick(); showReflections(true); showOutside(true); renderer.render(scene, camera); return; }
     if (!container.offsetParent) return;
+    if (keys.size && walk(dt)) { controls.update(); updateCutaway(); v3.dirty = true; }
     if (controls.update() || v3.dirty) {
       v3.dirty = false;
       const c = camera.position, room = store.d.room;

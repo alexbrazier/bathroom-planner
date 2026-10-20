@@ -236,7 +236,7 @@ function itemPanel(el, it) {
       <button data-act="del" class="danger">Delete</button>
     </div>
     ${(store.project?.rooms.length || 1) > 1 ? `<div class="row" style="margin-top:8px"><label>Copy to room</label><select data-k="copyTo"><option value="">Choose…</option>${store.project.rooms.filter((r) => r.id !== store.project.active).map((r) => `<option value="${r.id}">${esc(r.name)}</option>`).join('')}</select></div>` : ''}
-    <div class="note" style="margin-top:10px">Keys: R rotate · Del delete · ⌘/Ctrl+D duplicate · ⌘/Ctrl+C copy, ⌘/Ctrl+V paste (also into another room) · arrows nudge 10 mm (Shift = 1 mm) · Alt-drag = no snapping</div>
+    <div class="note" style="margin-top:10px">Keys: R rotate · Del delete · ⌘/Ctrl+D duplicate · ⌘/Ctrl+C copy, ⌘/Ctrl+V paste (also into another room) · arrows nudge 10 mm (Shift = 1 mm) · drag the square edge handles to resize custom sizes · Alt-drag = no snapping</div>
   `;
   const riders = () => ridersOf(it);
   const withRiders = (fn) => { const r = riders(); fn(); applyRiders(it, r); };
