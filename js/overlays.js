@@ -83,6 +83,7 @@ function sync() {
         ${door ? `<button data-a="hinge" title="Swap hinge side">⇄ Hinge ${op.hinge === 'right' ? 'R' : 'L'}</button>
                  <button data-a="swing" title="Open into or out of the room">${op.swing === 'out' ? '↑ Opens out' : '↓ Opens in'}</button>`
                : `<label class="fb-num">Sill <input type="number" data-f="sill" value="${op.sill}"></label>
+                  <button data-a="style" title="Casement (side-hung) or sliding sash">${op.style === 'sash' ? '⇅ Sash' : '⇆ Casement'}</button>
                   <button data-a="glass" title="Glass: clear → frosted bottom half → frosted">${{ frosted: '▒ Frosted', half: '◧ Bottom frosted' }[op.glass] || '◻ Clear'}</button>`}
         <button data-a="del" class="danger" title="Delete">Delete</button>`;
       // look the opening up when used: undo/redo replace the design, so a captured object can be stale
@@ -102,6 +103,7 @@ function sync() {
       const b = (a) => ob.querySelector(`[data-a=${a}]`);
       if (b('hinge')) b('hinge').onclick = () => edit((op) => { op.hinge = op.hinge === 'right' ? 'left' : 'right'; });
       if (b('swing')) b('swing').onclick = () => edit((op) => { op.swing = op.swing === 'out' ? 'in' : 'out'; });
+      if (b('style')) b('style').onclick = () => edit((op) => { if (op.style === 'sash') delete op.style; else op.style = 'sash'; });
       if (b('glass')) b('glass').onclick = () => edit((op) => { op.glass = { half: 'frosted', frosted: 'clear' }[op.glass] || 'half'; });
       b('del').onclick = () => mutate(() => { store.d.openings = store.d.openings.filter((o) => o.id !== id); store.sel = null; });
     }

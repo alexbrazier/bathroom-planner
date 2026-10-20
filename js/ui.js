@@ -511,8 +511,11 @@ function openingPanel(el, op) {
     ${num('Height', 'height', op.height)}
     ${op.type === 'window' ? num('Sill height', 'sill', op.sill) : ''}
     ${op.type === 'window' ? `
-      <div class="row"><label>Glass</label><select data-k="glass">${[['clear', 'Clear'], ['half', 'Frosted bottom half'], ['frosted', 'Frosted (obscure)']].map(([v, l]) => `<option value="${v}" ${(op.glass || 'clear') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-      <div class="row"><label>Opening sashes</label><select data-k="panes">${[[0, 'Auto'], [1, '1'], [2, '2'], [3, '3']].map(([v, l]) => `<option value="${v}" ${(op.panes || 0) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>` : ''}
+      <div class="row"><label>Glass</label><select data-k="glass">${[['clear', 'Clear'], ['half', op.style === 'sash' ? 'Frosted lower sash' : 'Frosted bottom half'], ['frosted', 'Frosted (obscure)']].map(([v, l]) => `<option value="${v}" ${(op.glass || 'clear') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <div class="row"><label>Style</label><select data-k="wStyle"><option value="casement" ${op.style !== 'sash' ? 'selected' : ''}>Casement (side-hung)</option><option value="sash" ${op.style === 'sash' ? 'selected' : ''}>Sliding sash</option></select></div>
+      ${op.style === 'sash'
+        ? `<div class="row"><label>Glazing bars</label><select data-k="bars">${[['1', '1 over 1'], ['2', '2 over 2'], ['6', '6 over 6 (Georgian)']].map(([v, l]) => `<option value="${v}" ${(op.bars || '1') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`
+        : `<div class="row"><label>Opening sashes</label><select data-k="panes">${[[0, 'Auto'], [1, '1'], [2, '2'], [3, '3']].map(([v, l]) => `<option value="${v}" ${(op.panes || 0) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`}` : ''}
     ${op.type === 'door' ? `
       <div class="row"><label>Hinge side</label><select data-k="hinge"><option value="left" ${op.hinge !== 'right' ? 'selected' : ''}>Left</option><option value="right" ${op.hinge === 'right' ? 'selected' : ''}>Right</option></select></div>
       <div class="row"><label>Opens</label><select data-k="swing"><option value="in" ${op.swing !== 'out' ? 'selected' : ''}>Into room</option><option value="out" ${op.swing === 'out' ? 'selected' : ''}>Outwards</option></select></div>
@@ -526,6 +529,8 @@ function openingPanel(el, op) {
     height: (v) => mutate(() => { op.height = Math.max(200, +v); }, 'room'),
     sill: (v) => mutate(() => { op.sill = Math.max(0, +v); }, 'room'),
     glass: (v) => mutate(() => { op.glass = v; }, 'room'),
+    wStyle: (v) => mutate(() => { if (v === 'sash') op.style = 'sash'; else delete op.style; }, 'room'),
+    bars: (v) => mutate(() => { if (v === '1') delete op.bars; else op.bars = v; }, 'room'),
     doorTo: (v) => mutate(() => { if (v === 'outside') op.to = 'outside'; else delete op.to; }, 'room'),
     panes: (v) => mutate(() => { if (+v) op.panes = +v; else delete op.panes; }, 'room'),
     hinge: (v) => mutate(() => { op.hinge = v; }, 'room'),

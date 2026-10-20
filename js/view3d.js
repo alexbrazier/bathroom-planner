@@ -436,6 +436,36 @@ function nichesOnWall(w, room) {
 }
 export const nicheSignature = () => JSON.stringify(store.d.items.filter((o) => modelOf(o)?.kind === 'niche').map((o) => [o.x, o.y, o.rot, o.elev, sizeOf(o).w, sizeOf(o).d, sizeOf(o).h]));
 
+// Vertical sliding sash: the upper sash sits on the outside track and the lower sash on the inside, overlapping at
+// the meeting rails. Glazing bars per sash: '1' (1 over 1), '2' (2 over 2), '6' (6 over 6, Georgian).
+// 'half' glass = frosted lower sash.
+function sashWindow(o, W, H, sill, ft, mk, frameM, fr) {
+  const iw = W - 2 * ft, ih = H - 2 * ft, y0 = sill + ft, half = ih / 2;
+  const meet = 0.035, sf = 0.05, topR = 0.05, botR = 0.075;
+  const [cols, rows] = { 2: [2, 1], 6: [3, 2] }[o.bars] || [1, 1];
+  const sash = (ya, yb, z, lower) => {
+    const rb = lower ? botR : meet, rt = lower ? meet : topR, h = yb - ya, sh = h - rb - rt;
+    mk(iw, rb, 0.045, 0, ya + rb / 2, z, frameM);
+    mk(iw, rt, 0.045, 0, yb - rt / 2, z, frameM);
+    mk(sf, sh, 0.045, -iw / 2 + sf / 2, ya + rb + sh / 2, z, frameM);
+    mk(sf, sh, 0.045, iw / 2 - sf / 2, ya + rb + sh / 2, z, frameM);
+    const gw = iw - 2 * sf, gy = ya + rb + sh / 2;
+    const glassM = o.glass === 'frosted' || (o.glass === 'half' && lower) ? frostedGlass() : MATS.glass;
+    const gl = new THREE.Mesh(new THREE.PlaneGeometry(gw, sh), glassM); gl.position.set(0, gy, z); fr.add(gl);
+    for (let c = 1; c < cols; c++) mk(0.02, sh, 0.03, -gw / 2 + (gw * c) / cols, gy, z, frameM);
+    for (let r = 1; r < rows; r++) mk(gw, 0.02, 0.03, 0, ya + rb + (sh * r) / rows, z, frameM);
+  };
+  const zOut = -0.012, zIn = 0.03;
+  sash(y0 + half - meet / 2, y0 + ih, zOut, false); // upper sash, outer track
+  sash(y0, y0 + half + meet / 2, zIn, true);        // lower sash, inner track
+  // fitch catch on the meeting rail and two sash lifts on the lower sash's bottom rail
+  mk(0.07, 0.012, 0.035, 0, y0 + half + meet / 2 + 0.006, zIn - 0.005, MATS.chrome);
+  for (const sx of [-1, 1]) {
+    mk(0.035, 0.012, 0.012, sx * iw * 0.3, y0 + botR * 0.55, zIn + 0.028, MATS.chrome);
+    mk(0.035, 0.022, 0.006, sx * iw * 0.3, y0 + botR * 0.55 - 0.012, zIn + 0.034, MATS.chrome);
+  }
+}
+
 function addOpening(g, w, o, room) {
   const T = room.thickness * MM;
   const t0 = o.offset, t1 = o.offset + o.width;
@@ -457,6 +487,8 @@ function addOpening(g, w, o, room) {
     // internal window board, 35 mm proud of the wall face
     const bd = T / 2 + 0.035;
     mk(W + 0.08, 0.022, bd, 0, sill - 0.011, bd / 2, mat('#f7f7f5', { roughness: 0.45 }));
+    if (o.style === 'sash') sashWindow(o, W, H, sill, ft, mk, frameM, fr);
+    else {
     // casement sashes (2 if wide enough) with clear or frosted (obscure) glass and a lever handle each
     const panes = o.panes || (W > 0.75 ? 2 : 1);
     const iw = W - 2 * ft, ih = H - 2 * ft, pw = iw / panes, sf = 0.045, y0 = sill + ft;
@@ -477,6 +509,7 @@ function addOpening(g, w, o, room) {
       mk(0.022, 0.05, 0.012, hx, hy, 0.036, MATS.chrome);
       mk(0.014, 0.012, 0.03, hx, hy - 0.018, 0.05, MATS.chrome);
       mk(0.014, 0.1, 0.012, hx, hy - 0.07, 0.062, MATS.chrome);
+    }
     }
   } else {
     const leafW = W - 2 * ft, leafH = H - ft;

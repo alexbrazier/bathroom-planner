@@ -314,7 +314,8 @@ function drawOpening(ctx, op, walls, px) {
   if (op.type === 'window') {
     if (op.glass === 'frosted' || op.glass === 'half') ctx.setLineDash([4 * px, 3 * px]); // obscure glass
     ctx.beginPath();
-    for (const f of [0.3, 0.5, 0.7]) {
+    // sliding sash: two full-width sashes on separate tracks; casement: frame + glass lines
+    for (const f of op.style === 'sash' ? [0.35, 0.62] : [0.3, 0.5, 0.7]) {
       ctx.moveTo(p0.x - w.nx * th * f, p0.y - w.ny * th * f); ctx.lineTo(p1.x - w.nx * th * f, p1.y - w.ny * th * f);
     }
     ctx.stroke(); ctx.setLineDash([]);
