@@ -60,42 +60,84 @@ export async function shareUrl(project) {
 }
 
 // ---- live links: a fixed short link whose design can be replaced by whoever has its edit key.
-// The edit keys you hold are kept in this browser only: { [key]: { edit, rooms: [roomId…], name, updated } }.
+// The edit keys you hold are kept in this browser only: { [key]: { edit, kind, target, rooms, name, updated } }
+//   kind 'project' → target is the project id (adding/removing rooms keeps the same link)
+//   kind 'room'    → target is the room id (it keeps working if the room moves to another project)
+// Older records only had `rooms` (the exact room set); they're adopted the first time they match.
 const LINKS_KEY = 'bathroom-designer:links';
 export function liveLinks() { try { return JSON.parse(localStorage.getItem(LINKS_KEY) || '{}'); } catch { return {}; } }
 function saveLinks(all) { try { localStorage.setItem(LINKS_KEY, JSON.stringify(all)); } catch { /* storage unavailable */ } }
 export function rememberLink(key, rec) { const all = liveLinks(); all[key] = { ...(all[key] || {}), ...rec }; saveLinks(all); }
 export function forgetLink(key) { const all = liveLinks(); delete all[key]; saveLinks(all); }
-// The live link that publishes exactly this set of rooms, if you have one.
-export function linkFor(roomIds) {
-  const want = [...roomIds].sort().join(',');
-  return Object.entries(liveLinks()).map(([key, r]) => ({ key, ...r })).find((r) => [...(r.rooms || [])].sort().join(',') === want) || null;
+const linkList = () => Object.entries(liveLinks()).map(([key, r]) => ({ key, ...r }));
+
+// The live link for this project / room, if you have one. ctx: { kind, target, roomIds, projectRoomIds }
+export function linkFor(ctx) {
+  const list = linkList();
+  const exact = list.find((r) => r.kind === ctx.kind && r.target === ctx.target);
+  if (exact) return exact;
+  // legacy records (room set only)
+  const legacy = list.filter((r) => !r.kind && r.rooms?.length);
+  let hit = null;
+  if (ctx.kind === 'room') hit = legacy.find((r) => r.rooms.length === 1 && r.rooms[0] === ctx.target);
+  else {
+    const mine = new Set(ctx.projectRoomIds);
+    // a multi-room link whose rooms are all still in this project, most recently updated first
+    hit = legacy.filter((r) => r.rooms.length > 1 && r.rooms.every((id) => mine.has(id))).sort((a, b) => (b.updated || 0) - (a.updated || 0))[0];
+  }
+  if (hit) { rememberLink(hit.key, { kind: ctx.kind, target: ctx.target }); return { ...hit, kind: ctx.kind, target: ctx.target }; }
+  return null;
+}
+// Other links you hold that belong to this project (to offer "use this one instead").
+export function otherLinksFor(ctx, exceptKey) {
+  const mine = new Set(ctx.projectRoomIds);
+  return linkList().filter((r) => r.key !== exceptKey && (r.target === ctx.projectId || mine.has(r.target) || (r.rooms || []).some((id) => mine.has(id))))
+    .sort((a, b) => (b.updated || 0) - (a.updated || 0));
 }
 const api = () => (shortApi() || '').replace(/\/$/, '');
 const urlFor = (key) => { const u = new URL(location.href); u.hash = 's=' + key; return u.toString(); };
+export const linkUrl = urlFor;
 
-// Create a live link, or update the existing one for these rooms. Returns { url, key, edit, updated, created }.
+async function putLink(rec, token) {
+  return fetch(`${api()}/${rec.key}`, { method: 'PUT', body: token, headers: { 'Content-Type': 'text/plain', 'X-Edit-Key': rec.edit }, signal: AbortSignal.timeout(8000) });
+}
+
+// Create a live link, or update the existing one for this project/room. Returns { url, key, edit, updated, created }.
 // Throws if the share server can't be reached (callers fall back to shareUrl()).
-export async function publishLive(project, roomIds, name) {
+export async function publishLive(project, ctx) {
   if (!api()) throw new Error('Short links are not set up');
   const token = await encodeProject(project);
-  const rec = linkFor(roomIds);
+  const rec = linkFor(ctx);
+  const meta = { kind: ctx.kind, target: ctx.target, rooms: [...ctx.roomIds], name: ctx.name };
   if (rec) {
-    const r = await fetch(`${api()}/${rec.key}`, { method: 'PUT', body: token, headers: { 'Content-Type': 'text/plain', 'X-Edit-Key': rec.edit }, signal: AbortSignal.timeout(8000) });
+    const r = await putLink(rec, token);
     if (r.ok) {
       const { updated } = await r.json();
-      rememberLink(rec.key, { updated, name });
+      rememberLink(rec.key, { ...meta, updated });
       return { url: urlFor(rec.key), key: rec.key, edit: rec.edit, updated, created: false };
     }
-    // the link is gone or the key no longer matches: make a fresh one
+    // only give up on the old link if the server says it's gone or the key is wrong
     if (r.status === 403 || r.status === 404 || r.status === 409) forgetLink(rec.key);
     else throw new Error(`Share server error ${r.status}`);
   }
   const r = await fetch(`${api()}/live`, { method: 'POST', body: token, headers: { 'Content-Type': 'text/plain' }, signal: AbortSignal.timeout(8000) });
   if (!r.ok) throw new Error(`Share server error ${r.status}`);
   const { key, edit, updated } = await r.json();
-  rememberLink(key, { edit, rooms: [...roomIds], name, updated });
+  rememberLink(key, { ...meta, edit, updated });
   return { url: urlFor(key), key, edit, updated, created: true };
+}
+
+// Point an earlier live link at this project/room (and publish to it), dropping another one you no longer want.
+export async function useLinkInstead(key, project, ctx, dropKey) {
+  const rec = { key, ...liveLinks()[key] };
+  const r = await putLink(rec, await encodeProject(project));
+  if (!r.ok) throw new Error(r.status === 403 ? 'That link\'s edit key no longer works' : r.status === 404 ? 'That link no longer exists' : `Share server error ${r.status}`);
+  const { updated } = await r.json();
+  // unbind anything else that was serving this project/room, then bind this one
+  for (const o of linkList()) if (o.key !== key && o.kind === ctx.kind && o.target === ctx.target) rememberLink(o.key, { kind: null, target: null });
+  if (dropKey && dropKey !== key) forgetLink(dropKey);
+  rememberLink(key, { kind: ctx.kind, target: ctx.target, rooms: [...ctx.roomIds], name: ctx.name, updated });
+  return { url: urlFor(key), key, edit: rec.edit, updated };
 }
 
 // Check an edit key for a live link (true / false); throws if the server can't be reached.

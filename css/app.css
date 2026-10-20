@@ -283,3 +283,7 @@ button.proj { background: none; border: 0; font: inherit; font-weight: 600; }
 
 .print-card { width: min(560px, 94vw); }
 .print-card .grid2 { margin: 10px 0; }
+
+.share-other { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 12.5px; }
+.share-other button { margin-left: auto; }
+.share-other code { font-size: 12px; }

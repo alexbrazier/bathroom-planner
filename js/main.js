@@ -1,6 +1,6 @@
 import { loadCatalog } from './catalog.js';
 import { store, on, emit, load, undo, redo, select, itemById, newDesign, replaceDesign, checkpoint, commit, sizeOf, makeProject, asProject, loadProject, switchRoom, addRoom, renameRoom, deleteRoom, activeRoom, viewShared, leaveShared, listProjects, switchProject, renameProject, duplicateProject, deleteProject, moveRoom } from './state.js';
-import { shareUrl, sharedToken, resolveShared, publishLive, linkFor, forgetLink, checkEditKey, rememberLink, liveLinks } from './share.js';
+import { shareUrl, sharedToken, resolveShared, publishLive, linkFor, forgetLink, checkEditKey, rememberLink, liveLinks, otherLinksFor, useLinkInstead, linkUrl } from './share.js';
 import { exportGLB, exportOBJ } from './export3d.js';
 import { buildPrint, toSTL, to3MF } from './print3d.js';
 import { initPlan, draw, fit, zoom, setTool, drawKey, exportPNG, addModelAt, plan, applyPlanTheme } from './plan2d.js';
@@ -67,16 +67,17 @@ async function main() {
   };
   const ago = (t) => { const s = Math.round((Date.now() - t) / 1000); return s < 60 ? 'just now' : s < 3600 ? `${Math.round(s / 60)} min ago` : new Date(t).toLocaleString(); };
   const doShare = async (mode = 'live') => {
-    const { p, roomIds, label, name } = shareCtx;
+    const { p, label } = shareCtx;
     $('#shareDlg').hidden = false;
     $('#shareUrl').value = 'Making link…'; $('#shareStatus').textContent = '';
-    $('#shareKeyBox').hidden = true; $('#shareNew').hidden = true;
+    $('#shareKeyBox').hidden = true; $('#shareNew').hidden = true; $('#shareOthers').innerHTML = '';
     $('#shareWhat').textContent = label;
     if (mode === 'live') {
       try {
-        const r = await publishLive(p, roomIds, name);
-        $('#shareStatus').innerHTML = `<b>Live link</b> — ${r.created ? 'created' : 'updated with your latest changes'} ${ago(r.updated)}. Share these rooms again any time to update what it shows (it can take up to a minute to reach everyone).`;
+        const r = await publishLive(p, shareCtx);
+        $('#shareStatus').innerHTML = `<b>Live link</b> — ${r.created ? 'created' : 'updated with your latest changes'} ${ago(r.updated)}. Share this ${shareCtx.kind === 'project' ? 'project' : 'room'} again any time to update what it shows — the link stays the same even if you add or move rooms (it can take up to a minute to reach everyone).`;
         $('#shareKey').value = r.edit; $('#shareKeyBox').hidden = false; $('#shareNew').hidden = r.created;
+        renderOtherLinks(r);
         return showLink(r.url);
       } catch (err) {
         console.warn('Live link failed', err);
@@ -95,16 +96,34 @@ async function main() {
     const rooms = whole ? store.project.rooms : [room];
     shareCtx = {
       p: whole ? store.project : { version: 2, name: store.project.name, rooms: [room], active: room.id },
+      kind: whole ? 'project' : 'room', target: whole ? store.project.id : room.id,
+      projectId: store.project.id, projectRoomIds: store.project.rooms.map((r) => r.id),
       roomIds: rooms.map((r) => r.id),
       name: whole ? store.project.name : room.name,
       label: whole ? `Whole project "${store.project.name}" — ${rooms.length} room${rooms.length > 1 ? 's' : ''}` : `Room "${room.name}" from "${store.project.name}"`,
     };
     doShare('live');
   });
+  // Earlier live links for this project (e.g. one made before rooms changed): offer to switch back to one of them.
+  function renderOtherLinks(cur) {
+    const others = otherLinksFor(shareCtx, cur.key);
+    if (!others.length) { $('#shareOthers').innerHTML = ''; return; }
+    $('#shareOthers').innerHTML = `<p class="note"><b>You have ${others.length === 1 ? 'an earlier link' : 'earlier links'} for this project.</b> Use one instead to keep that URL${cur.created ? ' (the link just made is then dropped)' : ''}:</p>`
+      + others.map((o) => `<div class="share-other"><code>#s=${esc(o.key)}</code> <span class="muted">${esc(o.name || '')}${o.updated ? ' · ' + ago(o.updated) : ''}</span><button data-use="${esc(o.key)}">Use this one</button></div>`).join('');
+    $('#shareOthers').querySelectorAll('[data-use]').forEach((b) => b.addEventListener('click', async () => {
+      try {
+        const r = await useLinkInstead(b.dataset.use, shareCtx.p, shareCtx, cur.created ? cur.key : null);
+        $('#shareStatus').innerHTML = `<b>Live link</b> — switched back to your earlier link and updated it ${ago(r.updated)}. Sharing this ${shareCtx.kind === 'project' ? 'project' : 'room'} now updates this link.`;
+        $('#shareKey').value = r.edit; $('#shareNew').hidden = false;
+        renderOtherLinks({ key: r.key, created: false });
+        showLink(r.url);
+      } catch (err) { toast(err.message || "Couldn't use that link"); }
+    }));
+  }
   $('#shareSnapshot').onclick = () => shareCtx && doShare('snapshot');
   $('#shareNew').onclick = () => {
     if (!shareCtx) return;
-    const rec = linkFor(shareCtx.roomIds);
+    const rec = linkFor(shareCtx);
     if (rec && !confirm('Make a brand-new live link? The current link keeps showing the design as it was last shared, and you won\'t be able to update it any more.')) return;
     if (rec) forgetLink(rec.key);
     doShare('live');
@@ -130,7 +149,9 @@ async function main() {
     const name = store.project.rooms.length > 1 ? store.project.name : store.project.rooms[0]?.name;
     const t = sharedToken();
     const ids = leaveShared(how);
-    if (claim && claim.key === t?.key) { rememberLink(claim.key, { edit: claim.edit, rooms: ids, name, updated: Date.now() }); toast('Saved — sharing these rooms will update the original link'); claim = null; }
+    if (claim && claim.key === t?.key) {
+      const multi = ids.length > 1;
+      rememberLink(claim.key, { edit: claim.edit, rooms: ids, name, updated: Date.now(), kind: multi ? 'project' : 'room', target: multi ? store.project.id : ids[0] }); toast('Saved — sharing these rooms will update the original link'); claim = null; }
     else toast(how === 'new' ? `Saved as a new project "${store.project.name}"` : 'Added to your project');
     clearHash(); syncReadOnly(); fit(); resetCamera();
   };
