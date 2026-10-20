@@ -302,6 +302,7 @@ export const BRANDS = [
   { id: 'dansani', label: 'Dansani Luna', test: (m) => m.brand === 'Dansani' },
   { id: 'collaro', label: 'V&B Collaro', test: (m) => m.brand === 'Villeroy & Boch' && m.range === 'Collaro' },
   { id: 'subway', label: 'V&B Subway 3.0', test: (m) => m.brand === 'Villeroy & Boch' && m.range === 'Subway 3.0' },
+  { id: 'oberon', label: 'V&B Oberon', test: (m) => m.brand === 'Villeroy & Boch' && m.range === 'Oberon' },
   { id: 'architectura', label: 'V&B Architectura', test: (m) => m.brand === 'Villeroy & Boch' && m.range === 'Architectura' },
   { id: 'viclean', label: 'V&B ViClean shower toilets', test: (m) => m.brand === 'Villeroy & Boch' && m.range === 'ViClean' },
   { id: 'hansgrohe', label: 'hansgrohe', test: (m) => m.brand === 'hansgrohe' },

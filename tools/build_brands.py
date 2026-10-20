@@ -14,16 +14,21 @@ def num(x):
     m=re.match(r'\d+(?:\.\d+)?',x)
     return float(m.group(0)) if m else 0.0
 def dims(p,L):
-    w=d=h=None
+    w=d=h=None; length=None
     for i,l in enumerate(L[:400]):
         nx=L[i+1] if i+1<len(L) else ''
         m=re.match(r'^([\d.,]+)\s*(cm|mm)$',nx)
         if not m: continue
         v=num(m.group(1))*(10 if m.group(2)=='cm' else 1)
-        if l in('Width:','Breite:') and w is None: w=v
+        if l in('Length:','Länge:') and length is None: length=v
+        elif l in('Width:','Breite:') and w is None: w=v
         elif l in('Depth:','Tiefe:','Projection:','Ausladung:') and d is None: d=v
         elif l in('Height:','Höhe:') and h is None: h=v
         if w and d and h: break
+    # baths list Length and Width: the length runs along the wall (our width), their width is our depth
+    if length and re.search(r'bath', p.get('name') or '', re.I):
+        if d is None: d=w
+        w=length
     s=p.get('dims') or ''
     # baths give "L: 180 W: 80 H: 48 cm" — length is our width, W is our depth
     keys=(('L','w'),('W','d'),('B','d'),('H','h')) if re.search(r'\bL:\s*\d',s) else (('W','w'),('B','w'),('D','d'),('T','d'),('H','h'))
@@ -41,7 +46,8 @@ def dims(p,L):
         f=10 if m.group(4)=='cm' else 1
         a,b=num(m.group(1))*f,num(m.group(2))*f
         if w is None: w=a
-        if d is None and h is None: d=b
+        # baths are named "length x width", so the second number is the depth even when a height is listed
+        if d is None and (h is None or re.search(r'bath', nm, re.I)): d=b
     m=re.search(r'Ø\s*(\d+(?:[.,]\d+)?)\s*(cm|mm)',nm)
     if m and w is None: w=num(m.group(1))*(10 if m.group(2)=='cm' else 1)
     return w,d,h
@@ -119,7 +125,7 @@ for p in P:
         if not d or not h: continue
     if k=='bath' and h<540: h+=110  # tub height + leg set = rim height off the floor
     rng = p['range'] if BRAND!='hansgrohe' else re.split(r'\s*\|\s*', p['cat'])[0]
-    rng_label={'collaro':'Collaro','subway':'Subway 3.0','viclean':'ViClean','Shower sets with shower holder':'Hand shower sets','Shower sets with shower bar':'Shower rail sets','Wall outlets':'FixFit & Porter','Shower holders':'FixFit & Porter'}.get(rng,rng)
+    rng_label={'collaro':'Collaro','subway':'Subway 3.0','viclean':'ViClean','oberon':'Oberon','Shower sets with shower holder':'Hand shower sets','Shower sets with shower bar':'Shower rail sets','Wall outlets':'FixFit & Porter','Shower holders':'FixFit & Porter'}.get(rng,rng)
     cname=clean(name)
     mid=re.sub(r'[^a-z0-9]+','-',(PREFIX+' '+rng_label+' '+k+' '+cname).lower()).strip('-')[:120]
     nl=name.lower()

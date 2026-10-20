@@ -646,7 +646,8 @@ export function bathInfo(it) {
 }
 
 // Double-ended ("Duo") baths: backrest at both ends, waste in the middle.
-export const isDuo = (m) => /\bduo\b|double.?ended/i.test(m?.name || '');
+export const isDuo = (m) => /\bduo\b|double.?ended/i.test(m?.name || '')
+  || (/oberon 2\.[01]/i.test(m?.name || '') && !/solo/i.test(m?.name || '')); // Oberon 2.x without "Solo" is the double-ended version
 
 // Ring-by-ring lofted surface: rings are rounded rectangles {x0, x1, hz, r, y}; bottom ring is capped.
 function rrRing(x0, x1, hz, r, y, k = 6) {
