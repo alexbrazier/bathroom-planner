@@ -2,7 +2,7 @@
 //  - short links (#s=<key>): the token is stored by the share Worker (worker/) under a key
 //  - long links  (#p=<token>): the token itself is in the URL fragment — used when the Worker can't be reached
 const PREFIX = 'p1.';
-// Short-link Worker. Set to '' to always make long links. For local testing with `wrangler dev`, run
+// Short-link Worker (live links + snapshots). Set to '' to always make long links. For local testing with `wrangler dev`, run
 // localStorage.setItem('bathroom-designer:shortApi', 'http://localhost:8787') in the console.
 const SHORT_API_DEFAULT = 'https://bathroom-designer-share.aejbrazier.workers.dev';
 const shortApi = () => { try { return localStorage.getItem('bathroom-designer:shortApi') ?? SHORT_API_DEFAULT; } catch { return SHORT_API_DEFAULT; } };
@@ -40,7 +40,7 @@ export async function decodeProject(token) {
   return JSON.parse(new TextDecoder().decode(bytes));
 }
 
-// Returns { url, short } — short is false when it fell back to a long link.
+// Snapshot link (never changes). Returns { url, short } — short is false when it fell back to a long link.
 export async function shareUrl(project) {
   const token = await encodeProject(project);
   const u = new URL(location.href);
@@ -57,6 +57,54 @@ export async function shareUrl(project) {
   }
   u.hash = 'p=' + token;
   return { url: u.toString(), short: false };
+}
+
+// ---- live links: a fixed short link whose design can be replaced by whoever has its edit key.
+// The edit keys you hold are kept in this browser only: { [key]: { edit, rooms: [roomId…], name, updated } }.
+const LINKS_KEY = 'bathroom-designer:links';
+export function liveLinks() { try { return JSON.parse(localStorage.getItem(LINKS_KEY) || '{}'); } catch { return {}; } }
+function saveLinks(all) { try { localStorage.setItem(LINKS_KEY, JSON.stringify(all)); } catch { /* storage unavailable */ } }
+export function rememberLink(key, rec) { const all = liveLinks(); all[key] = { ...(all[key] || {}), ...rec }; saveLinks(all); }
+export function forgetLink(key) { const all = liveLinks(); delete all[key]; saveLinks(all); }
+// The live link that publishes exactly this set of rooms, if you have one.
+export function linkFor(roomIds) {
+  const want = [...roomIds].sort().join(',');
+  return Object.entries(liveLinks()).map(([key, r]) => ({ key, ...r })).find((r) => [...(r.rooms || [])].sort().join(',') === want) || null;
+}
+const api = () => (shortApi() || '').replace(/\/$/, '');
+const urlFor = (key) => { const u = new URL(location.href); u.hash = 's=' + key; return u.toString(); };
+
+// Create a live link, or update the existing one for these rooms. Returns { url, key, edit, updated, created }.
+// Throws if the share server can't be reached (callers fall back to shareUrl()).
+export async function publishLive(project, roomIds, name) {
+  if (!api()) throw new Error('Short links are not set up');
+  const token = await encodeProject(project);
+  const rec = linkFor(roomIds);
+  if (rec) {
+    const r = await fetch(`${api()}/${rec.key}`, { method: 'PUT', body: token, headers: { 'Content-Type': 'text/plain', 'X-Edit-Key': rec.edit }, signal: AbortSignal.timeout(8000) });
+    if (r.ok) {
+      const { updated } = await r.json();
+      rememberLink(rec.key, { updated, name });
+      return { url: urlFor(rec.key), key: rec.key, edit: rec.edit, updated, created: false };
+    }
+    // the link is gone or the key no longer matches: make a fresh one
+    if (r.status === 403 || r.status === 404 || r.status === 409) forgetLink(rec.key);
+    else throw new Error(`Share server error ${r.status}`);
+  }
+  const r = await fetch(`${api()}/live`, { method: 'POST', body: token, headers: { 'Content-Type': 'text/plain' }, signal: AbortSignal.timeout(8000) });
+  if (!r.ok) throw new Error(`Share server error ${r.status}`);
+  const { key, edit, updated } = await r.json();
+  rememberLink(key, { edit, rooms: [...roomIds], name, updated });
+  return { url: urlFor(key), key, edit, updated, created: true };
+}
+
+// Check an edit key for a live link (true / false); throws if the server can't be reached.
+export async function checkEditKey(key, edit) {
+  const r = await fetch(`${api()}/${key}/check`, { method: 'POST', headers: { 'X-Edit-Key': edit }, signal: AbortSignal.timeout(8000) });
+  if (r.ok) return true;
+  if (r.status === 403) return false;
+  const msg = r.status === 409 ? 'That link is a snapshot and can\'t be updated' : r.status === 404 ? 'That link no longer exists' : `Share server error ${r.status}`;
+  throw new Error(msg);
 }
 
 // The share link in the current URL, if any: { kind: 'p', token } or { kind: 's', key }.

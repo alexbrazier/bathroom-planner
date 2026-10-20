@@ -112,25 +112,30 @@ export function loadProject(p) { store.readOnly = false; useProject(p); commit('
 // Show someone else's project from a share link without touching the saved one.
 export function viewShared(p) { useProject(p); store.readOnly = true; emit('load'); }
 // Leave the shared view, optionally adding its rooms to the user's own project.
+// Returns the ids of the copied rooms (in the user's project).
 export function leaveShared(copyRooms = false) {
   const shared = store.project;
   store.readOnly = false;
   const hadOwn = load();
+  let ids = [];
   if (copyRooms && !hadOwn) {
     // first visit: the shared project simply becomes theirs
     useProject(JSON.parse(JSON.stringify(shared)));
+    ids = store.project.rooms.map((r) => r.id);
   } else if (copyRooms) {
     const names = new Set(store.project.rooms.map((r) => r.name));
     for (const r of shared.rooms) {
       let name = r.name; let n = 2;
       while (names.has(name)) name = `${r.name} (${n++})`;
       names.add(name);
-      store.project.rooms.push({ id: uid(), name, design: JSON.parse(JSON.stringify(r.design)) });
+      const id = uid(); ids.push(id);
+      store.project.rooms.push({ id, name, design: JSON.parse(JSON.stringify(r.design)) });
     }
     store.project.active = store.project.rooms[store.project.rooms.length - shared.rooms.length].id;
     useProject(store.project);
   }
   commit('load');
+  return ids;
 }
 
 // Replace the active room's design (undoable).

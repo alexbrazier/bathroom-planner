@@ -162,8 +162,11 @@ def dl(item):
     if os.path.exists(fn) and os.path.getsize(fn)>500: return True
     u=f'https://www-megabad-com-res.cloudinary.com/image/upload/ar_1:1,c_pad,b_white,w_360/q_auto:good/f_webp/{imgid}'
     subprocess.run(['curl','-sL','--max-time','60','-A','Mozilla/5.0','-o',fn,u])
-    return os.path.exists(fn) and os.path.getsize(fn)>500
-used={s.get('thumb') for m in out for s in m['sizes']}
+    if os.path.exists(fn) and os.path.getsize(fn)>500: return True
+    if os.path.exists(fn): os.remove(fn)
+    return False
+# every image the output references: size thumbs and each colour variant's own photo
+used={s.get('thumb') for m in out for s in m['sizes']}|{v['img'] for m in out for s in m['sizes'] for v in s['variants']}
 jobs=[(i,p) for i,p in imgjobs.items() if p in used]
 with cf.ThreadPoolExecutor(16) as ex: ok=list(ex.map(dl,jobs))
 bad={p for (i,p),o in zip(jobs,ok) if not o}
@@ -171,7 +174,7 @@ for m in out:
     for s in m['sizes']:
         if s.get('thumb') in bad: s['thumb']=None
         for v in s['variants']:
-            if v['img'] in bad: v['img']=None
+            if v['img'] in bad: v['img']=s.get('thumb')  # fall back to the size's photo
     m['thumb']=m['sizes'][0].get('thumb')
 json.dump(out,open(OUT,'w'),separators=(',',':'))
 print(len(out),'models',sum(len(m['sizes']) for m in out),'sizes; images',sum(ok),'/',len(ok),file=sys.stderr)

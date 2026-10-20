@@ -26,8 +26,15 @@ one shows the design view-only, with **Save a copy** (adds the rooms to your own
 
 ### Short-link Worker (`worker/`)
 
-A Cloudflare Worker with a KV namespace: `POST /` stores a token and returns its key (keys are a hash of the
-design, so the same design always gives the same link), `GET /<key>` returns it. Only origins listed in
+A Cloudflare Worker with a KV namespace:
+
+- `POST /live` stores a token under a random key and returns `{ key, edit }`. **Share** uses these *live links*: the
+  browser keeps the edit key (localStorage `bathroom-designer:links`, per set of rooms), and sharing the same rooms
+  again `PUT /<key>`s the new design, so the link always shows the latest version. The Share dialog shows the edit
+  key; on another device, open the link → **I have the edit key** → **Save a copy**, and that copy updates the link.
+  Only a SHA-256 of the edit key is stored (as KV metadata). `POST /<key>/check` validates a key.
+- `POST /` makes a frozen snapshot (key = hash of the design; "Frozen snapshot link instead" in the dialog).
+- `GET /<key>` returns the token (snapshots are cached forever, live links `no-cache`). Only origins listed in
 `ALLOWED_ORIGINS` (`worker/wrangler.toml`) can create links. Free tier: 100k reads / 1k new links a day.
 
 One-off setup:

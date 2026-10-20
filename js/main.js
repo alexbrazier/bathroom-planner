@@ -1,6 +1,6 @@
 import { loadCatalog } from './catalog.js';
 import { store, on, load, undo, redo, select, itemById, newDesign, replaceDesign, checkpoint, commit, sizeOf, makeProject, asProject, loadProject, switchRoom, addRoom, renameRoom, deleteRoom, activeRoom, viewShared, leaveShared } from './state.js';
-import { shareUrl, sharedToken, resolveShared } from './share.js';
+import { shareUrl, sharedToken, resolveShared, publishLive, linkFor, forgetLink, checkEditKey, rememberLink, liveLinks } from './share.js';
 import { exportGLB, exportOBJ } from './export3d.js';
 import { initPlan, draw, fit, zoom, setTool, drawKey, exportPNG, addModelAt, plan } from './plan2d.js';
 import { enterVR, vrSupported } from './vr.js';
@@ -56,29 +56,81 @@ async function main() {
   const sm = $('#shareMenu');
   $('#shareBtn').onclick = (e) => { e.stopPropagation(); sm.classList.toggle('open'); };
   document.addEventListener('click', (e) => { if (!sm.contains(e.target)) sm.classList.remove('open'); });
+  // Share = a live link: sharing the same rooms again updates it (you keep its edit key in this browser).
+  let shareCtx = null;
+  const showLink = async (url) => {
+    $('#shareUrl').value = url; $('#shareUrl').select();
+    try { await navigator.clipboard.writeText(url); toast('Link copied'); } catch { /* user can press Copy */ }
+  };
+  const ago = (t) => { const s = Math.round((Date.now() - t) / 1000); return s < 60 ? 'just now' : s < 3600 ? `${Math.round(s / 60)} min ago` : new Date(t).toLocaleString(); };
+  const doShare = async (mode = 'live') => {
+    const { p, roomIds, label, name } = shareCtx;
+    $('#shareDlg').hidden = false;
+    $('#shareUrl').value = 'Making link…'; $('#shareStatus').textContent = '';
+    $('#shareKeyBox').hidden = true; $('#shareNew').hidden = true;
+    $('#shareWhat').textContent = label;
+    if (mode === 'live') {
+      try {
+        const r = await publishLive(p, roomIds, name);
+        $('#shareStatus').innerHTML = `<b>Live link</b> — ${r.created ? 'created' : 'updated with your latest changes'} ${ago(r.updated)}. Share these rooms again any time to update what it shows (it can take up to a minute to reach everyone).`;
+        $('#shareKey').value = r.edit; $('#shareKeyBox').hidden = false; $('#shareNew').hidden = r.created;
+        return showLink(r.url);
+      } catch (err) {
+        console.warn('Live link failed', err);
+        $('#shareStatus').textContent = "Couldn't reach the share server, so this is a snapshot link instead.";
+      }
+    }
+    const { url, short } = await shareUrl(p);
+    if (mode !== 'live') $('#shareStatus').textContent = short ? 'Frozen snapshot — this link always shows the design as it is now.' : `Snapshot with the design inside the link (${(url.length / 1024).toFixed(1)} KB).`;
+    return showLink(url);
+  };
   sm.addEventListener('click', async (e) => {
     const b = e.target.closest('[data-share]'); if (!b) return;
     sm.classList.remove('open');
     const whole = b.dataset.share === 'project';
     const room = activeRoom();
-    const p = whole ? store.project : { version: 2, name: store.project.name, rooms: [room], active: room.id };
-    $('#shareUrl').value = 'Making link…';
-    $('#shareDlg').hidden = false;
-    const { url, short } = await shareUrl(p);
-    $('#shareUrl').value = url;
-    const kind = short ? 'short link (design saved on the share server)' : `long link, ${(url.length / 1024).toFixed(1)} KB — the design is inside the link`;
-    $('#shareWhat').textContent = whole
-      ? `Whole project "${store.project.name}" — ${store.project.rooms.length} room${store.project.rooms.length > 1 ? 's' : ''} · ${kind}`
-      : `Room "${room.name}" from "${store.project.name}" · ${kind}`;
-    $('#shareDlg').hidden = false;
-    $('#shareUrl').select();
-    try { await navigator.clipboard.writeText(url); toast('Link copied'); } catch { /* user can press Copy */ }
+    const rooms = whole ? store.project.rooms : [room];
+    shareCtx = {
+      p: whole ? store.project : { version: 2, name: store.project.name, rooms: [room], active: room.id },
+      roomIds: rooms.map((r) => r.id),
+      name: whole ? store.project.name : room.name,
+      label: whole ? `Whole project "${store.project.name}" — ${rooms.length} room${rooms.length > 1 ? 's' : ''}` : `Room "${room.name}" from "${store.project.name}"`,
+    };
+    doShare('live');
   });
+  $('#shareSnapshot').onclick = () => shareCtx && doShare('snapshot');
+  $('#shareNew').onclick = () => {
+    if (!shareCtx) return;
+    const rec = linkFor(shareCtx.roomIds);
+    if (rec && !confirm('Make a brand-new live link? The current link keeps showing the design as it was last shared, and you won\'t be able to update it any more.')) return;
+    if (rec) forgetLink(rec.key);
+    doShare('live');
+  };
+  $('#shareKeyCopy').onclick = async () => { $('#shareKey').select(); try { await navigator.clipboard.writeText($('#shareKey').value); } catch { document.execCommand('copy'); } toast('Edit key copied — keep it private'); };
   $('#shareCopy').onclick = async () => { $('#shareUrl').select(); try { await navigator.clipboard.writeText($('#shareUrl').value); } catch { document.execCommand('copy'); } toast('Link copied'); };
   $('#shareDlg').addEventListener('click', (e) => { if (e.target.matches('[data-close]') || e.target === $('#shareDlg')) $('#shareDlg').hidden = true; });
 
   const clearHash = () => history.replaceState(null, '', location.pathname + location.search);
-  $('#sharedCopy').onclick = () => { leaveShared(true); clearHash(); syncReadOnly(); fit(); resetCamera(); toast('Saved to your projects'); };
+  // Opening someone's live link with its edit key: the saved copy stays linked, so sharing it updates the same link.
+  let claim = null;
+  $('#sharedClaim').onclick = async () => {
+    const t = sharedToken(); if (t?.kind !== 's') return;
+    const edit = (prompt('Paste the edit key for this link') || '').trim(); if (!edit) return;
+    try {
+      if (!(await checkEditKey(t.key, edit))) { toast("That edit key doesn't match this link"); return; }
+      claim = { key: t.key, edit };
+      $('#sharedClaim').textContent = '✓ Edit key added'; $('#sharedClaim').disabled = true;
+      toast('Edit key accepted — now Save a copy to edit and update this link');
+    } catch (err) { toast(err.message || "Couldn't check the key"); }
+  };
+  $('#sharedCopy').onclick = () => {
+    const name = store.project.rooms.length > 1 ? store.project.name : store.project.rooms[0]?.name;
+    const t = sharedToken();
+    const ids = leaveShared(true);
+    if (claim && claim.key === t?.key) { rememberLink(claim.key, { edit: claim.edit, rooms: ids, name, updated: Date.now() }); toast('Saved — sharing these rooms will update the original link'); claim = null; }
+    else toast('Saved to your projects');
+    clearHash(); syncReadOnly(); fit(); resetCamera();
+  };
   $('#sharedClose').onclick = () => { leaveShared(false); clearHash(); syncReadOnly(); fit(); resetCamera(); };
   window.addEventListener('hashchange', async () => {
     const t = sharedToken(); if (!t) return;
@@ -265,6 +317,10 @@ function syncReadOnly() {
   document.body.classList.toggle('readonly', ro);
   document.body.classList.toggle('shared', ro);
   $('#sharedBar').hidden = !ro;
+  // "I have the edit key" only for live short links you don't already hold the key for
+  const t = sharedToken();
+  $('#sharedClaim').hidden = !ro || t?.kind !== 's' || !!liveLinks()[t.key];
+  $('#sharedClaim').disabled = false; $('#sharedClaim').textContent = 'I have the edit key';
   for (const s of RO_HIDE) $(s)?.classList.toggle('ro-hide', ro);
   $('#openInput')?.closest('label')?.classList.toggle('ro-hide', ro);
   window.dispatchEvent(new Event('resize'));
