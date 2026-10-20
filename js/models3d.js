@@ -865,6 +865,7 @@ function metalMat(name) {
   if (/bronze/i.test(name)) return mat('#7d5c3e', { metal: 1, roughness: 0.38 });
   if (/black chrome/i.test(name)) return mat('#3d3d40', { metal: 1, roughness: 0.3 });
   if (/nickel/i.test(name)) return mat('#b4b3ad', { metal: 1, roughness: 0.3 });
+  if (/stainless|steel/i.test(name)) return mat('#c4c6c7', { metal: 1, roughness: 0.36 });
   if (/gunmetal/i.test(name)) return mat('#5b5d61', { metal: 1, roughness: 0.3 });
   return MATS.chrome;
 }
@@ -1253,8 +1254,102 @@ function paperHolder(it, s, m) {
   return g;
 }
 
+// Wall-mounted shaving / cosmetic mirror: square wall plate, double-jointed folding arm, round mirror facing the
+// room. Plain versions hang in a fork from below; LED versions have a lit ring with the arm joining at its side.
+function shavingMirror(it, s, m) {
+  const g = new THREE.Group();
+  const D = Math.max(0.15, s.d * MM), H = s.h * MM;
+  const mm = metalMat(colourName(it));
+  const led = /led|light/i.test(m.name);
+  const R = Math.min(0.11, Math.max(0.07, H * (led ? 0.45 : 0.36)));  // mirror radius
+  const cy = led ? H / 2 : H - R - 0.012;                              // mirror centre height
+  const back = -D / 2, zm = D / 2 - 0.02;                              // wall face / mirror plane
+  const armY = led ? cy : cy - R - 0.035;
+  // wall plate
+  const plate = new THREE.Mesh(new RoundedBoxGeometry(0.06, led ? 0.075 : 0.06, 0.016, 3, 0.006), mm);
+  plate.position.set(0, armY, back + 0.008); g.add(plate);
+  if (led) box(0.018, 0.008, 0.002, MATS.dark, -0.012, armY - 0.024, back + 0.017, g); // sensor / switch
+  // arm: plate → knuckle → knuckle → mirror, as round tubes with upright joints
+  const tube = (a, b, r = 0.0085) => {
+    const v = new THREE.Vector3().subVectors(b, a), L = v.length();
+    const c = new THREE.Mesh(new THREE.CylinderGeometry(r, r, L, 16), mm);
+    c.position.copy(a).addScaledVector(v, 0.5);
+    c.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), v.normalize()); g.add(c);
+  };
+  const knuckle = (p) => { const k = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.013, 0.045, 20), mm); k.position.copy(p); g.add(k); };
+  const end = led ? new THREE.Vector3(-R - 0.012, armY, zm) : new THREE.Vector3(0, armY, zm - 0.01);
+  const P0 = new THREE.Vector3(0, armY, back + 0.016);
+  const K1 = new THREE.Vector3(0.075, armY, back + (zm - back) * 0.38);
+  const K2 = new THREE.Vector3(led ? -R - 0.012 : -0.06, armY, back + (zm - back) * 0.72);
+  tube(P0, K1); knuckle(K1); tube(K1, K2); knuckle(K2); tube(K2, end);
+  // mirror head
+  const head = new THREE.Group(); head.position.set(0, cy, zm);
+  const ringD = led ? 0.024 : 0.01;
+  const ring = new THREE.Mesh(new THREE.CylinderGeometry(R, R, ringD, 48, 1, true), mm); ring.rotation.x = Math.PI / 2; head.add(ring);
+  const backDisc = new THREE.Mesh(new THREE.CircleGeometry(R, 48), mm); backDisc.position.z = -ringD / 2; backDisc.rotation.y = Math.PI; head.add(backDisc);
+  const face = new THREE.Mesh(new THREE.CircleGeometry(led ? R - 0.024 : R - 0.004, 48), MATS.mirror); face.position.z = ringD / 2 + 0.0005; head.add(face);
+  if (led) {
+    const glow = new THREE.Mesh(new THREE.RingGeometry(R - 0.021, R - 0.009, 48), new THREE.MeshStandardMaterial({ color: '#fbf8f0', emissive: '#fff3dc', emissiveIntensity: 0.9, roughness: 0.6 }));
+    glow.position.z = ringD / 2 + 0.0004; head.add(glow);
+    const bezel = new THREE.Mesh(new THREE.RingGeometry(R - 0.009, R, 48), mm); bezel.position.z = ringD / 2 + 0.0003; head.add(bezel);
+    // short stub from the arm into the ring's side
+    const stub = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.009, 0.014, 12), mm); stub.rotation.z = Math.PI / 2; stub.position.set(-R - 0.005, 0, 0); head.add(stub);
+  } else {
+    // fork from the arm end up to pivots either side of the mirror
+    const fy = -R - 0.02;
+    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 2 * R + 0.02, 12), mm); bar.rotation.z = Math.PI / 2; bar.position.set(0, fy, -0.01); head.add(bar);
+    for (const sx of [-1, 1]) {
+      const up = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, -fy, 12), mm); up.position.set(sx * (R + 0.01), fy / 2, -0.01); head.add(up);
+      const pivot = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.009, 0.012, 16), mm); pivot.rotation.z = Math.PI / 2; pivot.position.set(sx * (R + 0.008), 0, 0); head.add(pivot);
+    }
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.035, 12), mm); stem.position.set(0, fy - 0.0175 + 0.002, -0.01); head.add(stem);
+  }
+  g.add(head);
+  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  return g;
+}
+
+// Toilet brush: wall-mounted (square bracket gripping a frosted glass cup) or freestanding (metal pot with a lid
+// collar). The brush handle stands up out of the container.
+function toiletBrush(it, s, m) {
+  const g = new THREE.Group();
+  const W = s.w * MM, D = s.d * MM, H = s.h * MM;
+  const mm = metalMat(colourName(it));
+  const wall = /wall/i.test(m.name);
+  const r = Math.min(W, D) * (wall ? 0.36 : 0.46);
+  const cz = wall ? D / 2 - r - 0.012 : 0;               // container centre (wall ones stand off on the bracket)
+  const ch = wall ? H * 0.5 : H * 0.42;                   // container height
+  if (wall) {
+    const cup = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 0.96, ch, 32, 1, true), new THREE.MeshStandardMaterial({ color: '#eef1f2', roughness: 0.85, transparent: true, opacity: 0.9, side: THREE.DoubleSide }));
+    cup.position.set(0, ch / 2, cz); g.add(cup);
+    const base = new THREE.Mesh(new THREE.CircleGeometry(r * 0.96, 32), cup.material); base.rotation.x = -Math.PI / 2; base.position.set(0, 0.002, cz); g.add(base);
+    // square bracket ring round the top of the cup, and the arm back to a wall plate
+    const by = ch * 0.78, bw = 2 * r + 0.016, t = 0.008;
+    box(bw, 0.014, t, mm, 0, by, cz - r - 0.004, g); box(bw, 0.014, t, mm, 0, by, cz + r + 0.004, g);
+    box(t, 0.014, bw, mm, -r - 0.004, by, cz, g); box(t, 0.014, bw, mm, r + 0.004, by, cz, g);
+    box(0.03, 0.03, cz - r - (-D / 2), mm, 0, by, (-D / 2 + cz - r) / 2, g);
+    const plate = new THREE.Mesh(new RoundedBoxGeometry(0.05, 0.05, 0.012, 2, 0.004), mm); plate.position.set(0, by, -D / 2 + 0.006); g.add(plate);
+  } else {
+    const pot = new THREE.Mesh(new THREE.CylinderGeometry(r, r, ch, 40, 1, true), mm); pot.position.y = ch / 2; g.add(pot);
+    const bottom = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.004, 40), mm); bottom.position.y = 0.002; g.add(bottom);
+    // lid collar with a hole for the handle
+    const collar = new THREE.Mesh(new THREE.TorusGeometry(r * 0.62, r * 0.36, 12, 40), mm);
+    collar.rotation.x = Math.PI / 2; collar.scale.set(1, 1, 0.35); collar.position.y = ch + 0.004; g.add(collar);
+    const inside = new THREE.Mesh(new THREE.CircleGeometry(r * 0.3, 24), MATS.dark); inside.rotation.x = -Math.PI / 2; inside.position.y = ch + 0.002; g.add(inside);
+  }
+  // brush handle, with a small cap on top
+  const hb = wall ? 0.04 : ch - 0.03;
+  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.0055, 0.0055, H - hb, 16), wall ? mm : mm);
+  handle.position.set(0, hb + (H - hb) / 2, cz); g.add(handle);
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.008, 16, 10), mm); cap.position.set(0, H - 0.002, cz); g.add(cap);
+  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  return g;
+}
+
 function accessory(it, s, m) {
   if (/roll holder|paper holder|toilet roll|paper roll/i.test(m.name)) return paperHolder(it, s, m);
+  if (/toilet brush/i.test(m.name)) return toiletBrush(it, s, m);
+  if (/(shaving|cosmetic|make-?up) mirror|magnifying mirror/i.test(m.name)) return shavingMirror(it, s, m);
   const g = new THREE.Group();
   const W = s.w * MM, D = s.d * MM, H = s.h * MM;
   const mm = metalMat(colourName(it));

@@ -114,6 +114,8 @@ const GENERIC = [
   G('towelbar', 'Hand towel bar', 'towelholder', [[300, 70, 40], [450, 70, 40], [600, 70, 40]], { colours: ['Chrome', 'Black matt', 'Brushed brass', 'Brushed nickel', 'Gunmetal'] }),
   G('rollholder', 'Toilet roll holder', 'accessory', [[150, 120, 80]], { colours: ['Chrome', 'Black matt', 'Brushed brass', 'Brushed nickel', 'Gunmetal'] }),
   G('rollholder-lid', 'Toilet roll holder with lid', 'accessory', [[155, 125, 90]], { colours: ['Chrome', 'Black matt', 'Brushed brass', 'Brushed nickel', 'Gunmetal'] }),
+  G('toiletbrush', 'Toilet brush & holder (freestanding)', 'accessory', [[100, 100, 390], [90, 90, 360]], { colours: ['Chrome', 'Brushed stainless steel', 'Black matt', 'Brushed brass', 'Brushed nickel', 'Gunmetal'], elev: 0,
+    note: 'Metal pot with a lid collar and the brush standing in it. Sits on the floor beside the WC.' }),
   G('towelhook', 'Robe / towel hook', 'towelholder', [[40, 50, 40]], { colours: ['Chrome', 'Black matt', 'Brushed brass', 'Brushed nickel', 'Gunmetal'], shape: 'hook' }),
   G('porterset', 'Hand shower on hose with wall outlet', 'porterset', [[120, 130, 330], [110, 130, 400]], { colours: ['Chrome', 'Black matt', 'Brushed brass', 'Brushed nickel', 'Gunmetal'],
     note: 'Extra hand shower: wall outlet (e.g. hansgrohe FixFit) with the hose running up to a wall holder (Porter). Height off floor = the outlet; the holder sits at the top of the item.' }),
@@ -252,6 +254,8 @@ export async function loadCatalog() {
   for (const m of GENERIC) { m.brand = m.brand || (m.mtm ? 'Dansani' : 'Generic'); m.range = m.range || (m.mtm ? 'Luna' : ''); }
   MODELS = [...GENERIC.filter((g) => g.mtm), ...data, ...vb, ...hg, ...ARCHITECTURA, MERLYN, MB14, VANQUISH, VEGA, VENTAXIA, ...GENERIC.filter((g) => !g.mtm)];
   for (const m of MODELS) if (m.kind === 'showerhead' && !m.generic) normaliseShowerHead(m);
+  // wall-mounted toilet brush holders hang low beside the WC
+  for (const m of MODELS) if (m.kind === 'accessory' && /toilet brush/i.test(m.name) && m.elev == null) m.elev = /wall/i.test(m.name) ? 250 : 0;
   // Logis concealed basin mixers: listing gives overall height and no width; use the wall-plate size
   for (const m of MODELS) if (m.kind === 'walltap' && /logis/i.test(m.name)) for (const s of m.sizes) { s.w = /fine/i.test(m.name) ? 220 : 200; s.h = 80; }
   for (const m of MODELS) {

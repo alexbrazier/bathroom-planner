@@ -216,7 +216,7 @@ export function makeItem(modelId, x, y) {
   let vi = s.variants.findIndex((v) => v.colour === 'White matt');
   if (vi < 0) vi = s.variants.findIndex((v) => /white|chrome/i.test(v.colour));
   vi = Math.max(0, vi);
-  const it = { id: uid(), model: modelId, size: 0, variant: vi, x, y, rot: 0, elev: defaultElev(m.kind, s.h) };
+  const it = { id: uid(), model: modelId, size: 0, variant: vi, x, y, rot: 0, elev: m.elev ?? defaultElev(m.kind, s.h) };
   if (m.mtm) it.custom = { w: s.w, d: s.d, h: s.h };
   return it;
 }
