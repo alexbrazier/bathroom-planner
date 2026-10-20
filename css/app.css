@@ -280,3 +280,6 @@ button.proj { background: none; border: 0; font: inherit; font-weight: 600; }
 
 #props textarea[data-k="noteText"] { background: var(--field); color: var(--ink); }
 #themeBtn { min-width: 32px; padding: 5px 8px; }
+
+.print-card { width: min(560px, 94vw); }
+.print-card .grid2 { margin: 10px 0; }

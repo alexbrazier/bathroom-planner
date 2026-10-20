@@ -2,6 +2,7 @@ import { loadCatalog } from './catalog.js';
 import { store, on, emit, load, undo, redo, select, itemById, newDesign, replaceDesign, checkpoint, commit, sizeOf, makeProject, asProject, loadProject, switchRoom, addRoom, renameRoom, deleteRoom, activeRoom, viewShared, leaveShared, listProjects, switchProject, renameProject, duplicateProject, deleteProject, moveRoom } from './state.js';
 import { shareUrl, sharedToken, resolveShared, publishLive, linkFor, forgetLink, checkEditKey, rememberLink, liveLinks } from './share.js';
 import { exportGLB, exportOBJ } from './export3d.js';
+import { buildPrint, toSTL, to3MF } from './print3d.js';
 import { initPlan, draw, fit, zoom, setTool, drawKey, exportPNG, addModelAt, plan, applyPlanTheme } from './plan2d.js';
 import { enterVR, vrSupported } from './vr.js';
 import { init3d, rebuildRoom, rebuildItems, updateSelection, onShow, resetCamera, eyeLevel, setCutaway, setCeiling, setReflections, screenshot, applySceneTheme } from './view3d.js';
@@ -315,6 +316,30 @@ async function main() {
   $('#glbBtn').onclick = async () => { fm.classList.remove('open'); toast('Exporting 3D model…'); try { await exportGLB(base(), { ceiling: $('#expCeiling').checked }); toast('Exported .glb'); } catch (e) { console.error(e); toast('Export failed — see console'); } };
   $('#objBtn').onclick = () => { fm.classList.remove('open'); try { exportOBJ(base(), { ceiling: $('#expCeiling').checked }); toast('Exported .obj + .mtl'); } catch (e) { console.error(e); toast('Export failed — see console'); } };
   $('#expCeiling').onclick = (e) => e.stopPropagation();
+  // 3D print export
+  const pd = $('#printDlg');
+  const printOpts = () => {
+    const v = (k) => pd.querySelector(`[data-p="${k}"]`).value;
+    return { scale: +v('scale'), wallHeight: +v('wallHeight'), small: v('small'), fill: v('fill') === '1', format: v('format') };
+  };
+  const printPreview = () => {
+    const o = printOpts(), r = buildPrint(o), mm = (x) => Math.round(x);
+    const grams = r.volume / 1000 * 1.24 * 0.35; // PLA, rough allowance for walls + ~15% infill
+    $('#printInfo').innerHTML = `Printed size about <b>${mm(r.size.x)} × ${mm(r.size.y)} × ${mm(r.size.z)} mm</b> · roughly <b>${grams < 10 ? grams.toFixed(1) : Math.round(grams)} g</b> of PLA.`
+      + (r.skipped.length ? ` Left out: ${[...new Set(r.skipped)].length} small fitting${r.skipped.length > 1 ? 's' : ''}.` : '')
+      + (r.size.x > 250 || r.size.y > 250 ? ' <b>Larger than most print beds (~250 mm)</b> — try a smaller scale.' : '');
+  };
+  $('#printBtn').onclick = () => { fm.classList.remove('open'); pd.hidden = false; printPreview(); };
+  pd.querySelectorAll('[data-p]').forEach((el) => el.addEventListener('change', printPreview));
+  pd.addEventListener('click', (e) => { if (e.target.matches('[data-close]') || e.target === pd) pd.hidden = true; });
+  $('#printGo').onclick = () => {
+    const o = printOpts(), r = buildPrint(o);
+    const name = `${base()}-1to${o.scale}`;
+    const blob = o.format === 'stl' ? toSTL(r.meshes) : to3MF(r.meshes, `${store.project.name} — ${activeRoom().name} (1:${o.scale})`);
+    const url = URL.createObjectURL(blob);
+    download(`${name}.${o.format}`, url); setTimeout(() => URL.revokeObjectURL(url), 5000);
+    toast(`Exported ${name}.${o.format}`);
+  };
   $('#tplMenu').innerHTML = TEMPLATES.map((t) => `<button data-tpl="${t.id}">Replace with template: ${t.name}</button>`).join('');
   $('#tplMenu').onclick = (e) => {
     const b = e.target.closest('[data-tpl]'); if (!b) return;

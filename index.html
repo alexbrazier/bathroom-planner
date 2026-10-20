@@ -68,6 +68,7 @@
       <button id="shotBtn">Export 3D view image (.png)</button>
       <button id="glbBtn">Export 3D model (.glb) — Twinmotion, Blender, SketchUp</button>
       <button id="objBtn">Export 3D model (.obj + .mtl)</button>
+      <button id="printBtn">3D print this room (.3mf / .stl)…</button>
       <label class="as-btn chk"><input type="checkbox" id="expCeiling"> Include ceiling in 3D export</label>
     </div>
   </div>
@@ -138,6 +139,24 @@
 
   <aside id="props"></aside>
 </main>
+
+<div id="printDlg" class="modal" hidden>
+  <div class="modal-card print-card">
+    <div class="modal-head"><h2>3D print</h2><button class="x" data-close>×</button></div>
+    <p class="note">A simplified, solid model of this room for a slicer (Bambu Studio, PrusaSlicer, Cura…): floor plate, walls with
+      door and window openings, and fittings as blocks.</p>
+    <div class="grid2">
+      <div class="fld"><span>Scale</span><select data-p="scale"><option value="50" selected>1:50</option><option value="25">1:25</option><option value="20">1:20</option><option value="100">1:100</option></select></div>
+      <div class="fld"><span>Walls</span><select data-p="wallHeight"><option value="1200" selected>Cut down to 1200 mm</option><option value="1500">Cut down to 1500 mm</option><option value="900">Cut down to 900 mm</option><option value="0">Full height</option></select></div>
+      <div class="fld"><span>Small fittings (taps, towel rails, accessories)</span><select data-p="small"><option value="drop" selected>Leave out</option><option value="keep">Keep (thickened)</option></select></div>
+      <div class="fld"><span>Wall-hung units</span><select data-p="fill"><option value="1" selected>Fill down to the floor (no supports)</option><option value="0">As they are (needs supports)</option></select></div>
+      <div class="fld"><span>File</span><select data-p="format"><option value="3mf" selected>3MF (room and fittings as separate parts)</option><option value="stl">STL (one mesh)</option></select></div>
+    </div>
+    <p class="note" id="printInfo"></p>
+    <div class="btns"><button id="printGo" class="primary">Download</button></div>
+    <p class="note">Tips: 0.2 mm layers, 2 walls, 10–15% infill. Lower walls and a smaller scale save the most plastic — material grows with the cube of the scale.</p>
+  </div>
+</div>
 
 <div id="bom" class="modal" hidden>
   <div class="modal-card">
