@@ -16,6 +16,14 @@ Then open http://localhost:8137 (or double-click `start.command` on macOS).
 Designs are saved in the browser (per web address). Use **File → Save project** to keep a `.json`
 copy and **File → Open project** to move it between machines or between localhost and the live site.
 
+## Projects
+
+Click the project name in the header for **Projects**: switch between projects, or add, rename, duplicate and delete
+them. **Rooms ▾** can move or copy the current room into another project (or a new one). Everything is saved in the
+browser's localStorage: an index under `bathroom-designer:projects` and each project under `bathroom-designer:proj:<id>`
+(older single-project saves are migrated automatically). **File → Save/Open** exports and imports a project as
+`.json`; opening adds it as a new project.
+
 ## Sharing
 
 **Share ▾** creates a link to the current room or the whole project. The design is compressed into a token

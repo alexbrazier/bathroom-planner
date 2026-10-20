@@ -27,7 +27,10 @@
   <div class="bar-row" id="mainRow">
   <div class="brand"><img src="assets/logo-64.png" alt="" width="28" height="28">Bathroom Designer</div>
   <div class="rooms">
-    <span id="projectName" class="proj" title="Click to rename project"></span>
+    <div class="menu">
+      <button id="projBtn" class="proj" title="Projects — switch, add, rename"><span class="lbl" id="projectName"></span> ▾</button>
+      <div class="menu-pop" id="projMenu"></div>
+    </div>
     <select id="roomSelect" title="Switch room"></select>
     <div class="menu">
       <button id="roomBtn" title="Manage rooms">Rooms ▾</button>
@@ -37,6 +40,7 @@
         <button data-room="dup">Duplicate this room</button>
         <button data-room="rename">Rename this room</button>
         <button data-room="delete" class="danger">Delete this room</button>
+        <div id="roomMove"></div>
       </div>
     </div>
   </div>
@@ -88,7 +92,8 @@
 <div id="sharedBar" hidden>
   <span><b>Shared design</b> — view only. Nothing here is saved unless you save a copy.</span>
   <button id="sharedClaim" hidden title="If you have this link's edit key, add it so your copy can update the link">I have the edit key</button>
-  <button id="sharedCopy" class="primary">Save a copy to my projects</button>
+  <button id="sharedCopy" class="primary" title="Add these rooms to the project you have open">Add to my project</button>
+  <button id="sharedNew" title="Save these rooms as a project of their own">Save as new project</button>
   <button id="sharedClose">Close</button>
 </div>
 

@@ -1,5 +1,5 @@
 import { loadCatalog } from './catalog.js';
-import { store, on, load, undo, redo, select, itemById, newDesign, replaceDesign, checkpoint, commit, sizeOf, makeProject, asProject, loadProject, switchRoom, addRoom, renameRoom, deleteRoom, activeRoom, viewShared, leaveShared } from './state.js';
+import { store, on, load, undo, redo, select, itemById, newDesign, replaceDesign, checkpoint, commit, sizeOf, makeProject, asProject, loadProject, switchRoom, addRoom, renameRoom, deleteRoom, activeRoom, viewShared, leaveShared, listProjects, switchProject, renameProject, duplicateProject, deleteProject, moveRoom } from './state.js';
 import { shareUrl, sharedToken, resolveShared, publishLive, linkFor, forgetLink, checkEditKey, rememberLink, liveLinks } from './share.js';
 import { exportGLB, exportOBJ } from './export3d.js';
 import { initPlan, draw, fit, zoom, setTool, drawKey, exportPNG, addModelAt, plan } from './plan2d.js';
@@ -123,14 +123,16 @@ async function main() {
       toast('Edit key accepted — now Save a copy to edit and update this link');
     } catch (err) { toast(err.message || "Couldn't check the key"); }
   };
-  $('#sharedCopy').onclick = () => {
+  const saveShared = (how) => {
     const name = store.project.rooms.length > 1 ? store.project.name : store.project.rooms[0]?.name;
     const t = sharedToken();
-    const ids = leaveShared(true);
+    const ids = leaveShared(how);
     if (claim && claim.key === t?.key) { rememberLink(claim.key, { edit: claim.edit, rooms: ids, name, updated: Date.now() }); toast('Saved — sharing these rooms will update the original link'); claim = null; }
-    else toast('Saved to your projects');
+    else toast(how === 'new' ? `Saved as a new project "${store.project.name}"` : 'Added to your project');
     clearHash(); syncReadOnly(); fit(); resetCamera();
   };
+  $('#sharedCopy').onclick = () => saveShared('merge');
+  $('#sharedNew').onclick = () => saveShared('new');
   $('#sharedClose').onclick = () => { leaveShared(false); clearHash(); syncReadOnly(); fit(); resetCamera(); };
   window.addEventListener('hashchange', async () => {
     const t = sharedToken(); if (!t) return;
@@ -140,7 +142,7 @@ async function main() {
   // rooms
   const rm = $('#roomMenu');
   $('#roomSelect').onchange = (e) => { switchRoom(e.target.value); fit(); resetCamera(); };
-  $('#roomBtn').onclick = (e) => { e.stopPropagation(); rm.classList.toggle('open'); };
+  $('#roomBtn').onclick = (e) => { e.stopPropagation(); renderRoomMove(); rm.classList.toggle('open'); };
   document.addEventListener('click', (e) => { if (!rm.contains(e.target)) rm.classList.remove('open'); });
   $('#roomTpl').innerHTML = TEMPLATES.map((t) => `<button data-room="tpl" data-tpl="${t.id}">Add room from template: ${t.name}</button>`).join('');
   rm.addEventListener('click', (e) => {
@@ -157,8 +159,53 @@ async function main() {
       if (confirm(`Delete "${cur.name}"? This can't be undone.`)) { deleteRoom(cur.id); fit(); resetCamera(); }
     }
   });
-  $('#projectName').onclick = () => {
-    if (store.readOnly) return; const name = prompt('Project name', store.project.name); if (name) { store.project.name = name.trim(); commit('rooms'); } };
+  // projects: switch, add, rename, duplicate, delete
+  const pm = $('#projMenu');
+  const projList = () => listProjects().slice().sort((a, b) => (b.updated || 0) - (a.updated || 0));
+  const renderProjMenu = () => {
+    const cur = store.project.id;
+    pm.innerHTML = `<div class="menu-sep">Projects</div>`
+      + projList().map((p) => `<button data-proj="${p.id}" class="${p.id === cur ? 'on' : ''}">${p.id === cur ? '✓ ' : ''}${esc(p.name)} <span class="muted">· ${p.rooms} room${p.rooms === 1 ? '' : 's'}</span></button>`).join('')
+      + `<div class="menu-sep">This project</div>
+        <button data-pact="new">New project…</button>
+        <button data-pact="rename">Rename project…</button>
+        <button data-pact="dup">Duplicate project</button>
+        <button data-pact="delete" class="danger">Delete project…</button>`;
+  };
+  $('#projBtn').onclick = (e) => { e.stopPropagation(); if (store.readOnly) return; renderProjMenu(); pm.classList.toggle('open'); };
+  document.addEventListener('click', (e) => { if (!pm.contains(e.target)) pm.classList.remove('open'); });
+  pm.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-proj], [data-pact]'); if (!b) return;
+    pm.classList.remove('open');
+    const done = () => { fit(); resetCamera(); };
+    if (b.dataset.proj) { if (switchProject(b.dataset.proj)) { done(); toast(`Opened "${store.project.name}"`); } return; }
+    const act = b.dataset.pact;
+    if (act === 'new') { const name = prompt('Name for the new project', 'New project'); if (name) { loadProject(makeProject(newDesign(), name.trim(), 'Bathroom')); done(); } }
+    if (act === 'rename') { const name = prompt('Project name', store.project.name); if (name) renameProject(name.trim()); }
+    if (act === 'dup') { duplicateProject(); done(); toast('Project duplicated'); }
+    if (act === 'delete' && confirm(`Delete the project "${store.project.name}" and all ${store.project.rooms.length} of its rooms? This can't be undone.`)) { const n = store.project.name; deleteProject(); done(); toast(`Deleted "${n}"`); }
+  });
+  // rooms: move / copy the current room to another project
+  const renderRoomMove = () => {
+    const others = projList().filter((p) => p.id !== store.project.id);
+    const many = store.project.rooms.length > 1;
+    $('#roomMove').innerHTML = `<div class="menu-sep">Move this room to</div>`
+      + (many ? others.map((p) => `<button data-mv="${p.id}">${esc(p.name)}</button>`).join('') + `<button data-mv="new">A new project…</button>` : `<div class="menu-note">Add another room first — a project needs at least one</div>`)
+      + `<div class="menu-sep">Copy this room to</div>`
+      + others.map((p) => `<button data-cp="${p.id}">${esc(p.name)}</button>`).join('') + `<button data-cp="new">A new project…</button>`;
+  };
+  $('#roomMove').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-mv], [data-cp]'); if (!b) return;
+    rm.classList.remove('open');
+    const copy = !!b.dataset.cp, target = b.dataset.mv || b.dataset.cp, room = activeRoom();
+    let newName;
+    if (target === 'new') { newName = prompt('Name for the new project', room.name); if (!newName) return; }
+    const id = moveRoom(room.id, target === 'new' ? null : target, { copy, newName: newName?.trim() });
+    if (!id) { toast("Couldn't move that room"); return; }
+    const where = target === 'new' ? newName.trim() : listProjects().find((p) => p.id === id)?.name;
+    if (copy) toast(`Copied "${room.name}" to "${where}"`);
+    else { fit(); resetCamera(); toast(`Moved "${room.name}" to "${where}"`); }
+  });
 
   // view mode
   const layout = $('#layout');
@@ -242,8 +289,7 @@ async function main() {
   document.addEventListener('click', (e) => { if (!fm.contains(e.target)) fm.classList.remove('open'); });
   $('#newBtn').onclick = () => {
     fm.classList.remove('open');
-    if (!confirm('Start a new project? Save the current one first if you want to keep it.')) return;
-    const name = prompt('Project name', 'My project') || 'My project';
+    const name = prompt('Name for the new project (your current one stays in Projects)', 'New project'); if (!name) return;
     loadProject(makeProject(newDesign(), name, 'Bathroom')); fit(); resetCamera();
   };
   const base = () => `${slug(store.project.name)}-${slug(activeRoom().name)}`;
@@ -258,7 +304,7 @@ async function main() {
   $('#saveBtn').onclick = () => { download(slug(store.project.name) + '.json', 'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(store.project, null, 1))); fm.classList.remove('open'); };
   $('#openInput').onchange = async (e) => {
     const f = e.target.files[0]; if (!f) return;
-    try { const p = asProject(JSON.parse(await f.text()), f.name.replace(/\.json$/i, '')); if (!p) throw new Error('bad'); loadProject(p); fit(); resetCamera(); toast(`Opened ${p.rooms.length} room${p.rooms.length > 1 ? 's' : ''}`); }
+    try { const p = asProject(JSON.parse(await f.text()), f.name.replace(/\.json$/i, '')); if (!p) throw new Error('bad'); loadProject(p); fit(); resetCamera(); toast(`Opened as a new project: ${p.rooms.length} room${p.rooms.length > 1 ? 's' : ''}`); }
     catch { toast('That file is not a bathroom design'); }
     e.target.value = ''; fm.classList.remove('open');
   };
@@ -311,7 +357,7 @@ async function main() {
 }
 
 // Shared (view-only) mode: banner, and hide anything that edits or saves.
-const RO_HIDE = ['#undoBtn', '#redoBtn', '#roomBtn', '#toolDraw', '#newBtn', '#saveBtn', '#tplMenu'];
+const RO_HIDE = ['#undoBtn', '#redoBtn', '#roomBtn', '#projBtn', '#toolDraw', '#newBtn', '#saveBtn', '#tplMenu'];
 function syncReadOnly() {
   const ro = store.readOnly;
   document.body.classList.toggle('readonly', ro);
@@ -335,6 +381,7 @@ function syncRooms() {
   $('#projectName').textContent = store.project.name;
   document.title = `${activeRoom().name} · ${store.project.name} — Bathroom Designer`;
 }
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const slug = (s) => String(s || 'design').trim().replace(/[^\w-]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'design';
 
 function syncUndo() {

@@ -2,7 +2,10 @@
 import { byId, colourPair, defaultElev, parsePrice } from './catalog.js';
 
 const LS_KEY = 'bathroom-designer:v1';            // legacy single-room storage
-const PROJECT_KEY = 'bathroom-designer:project:v2';
+const PROJECT_KEY = 'bathroom-designer:project:v2'; // legacy single-project storage (migrated into the index)
+// Several projects: an index of { id, name, rooms, updated } plus each project under its own key.
+const INDEX_KEY = 'bathroom-designer:projects';
+const projKey = (id) => `bathroom-designer:proj:${id}`;
 
 export function defaultRoom() {
   return {
@@ -78,7 +81,7 @@ function validateSel() {
 // ---- projects (multiple rooms)
 export function makeProject(design, name = 'My project', roomName = 'Bathroom') {
   const id = uid();
-  return { version: 2, name, rooms: [{ id, name: roomName, design }], active: id };
+  return { version: 2, id: uid(), name, rooms: [{ id, name: roomName, design }], active: id };
 }
 // Accepts a project, or a legacy single-room design.
 export function asProject(data, roomName = 'Bathroom') {
@@ -94,34 +97,128 @@ function useProject(p) {
   store.sel = null;
 }
 
-export function save() {
-  if (store.readOnly) return;
-  try { localStorage.setItem(PROJECT_KEY, JSON.stringify(store.project)); } catch { /* storage unavailable */ }
+function readIndex() {
+  try { const ix = JSON.parse(localStorage.getItem(INDEX_KEY) || 'null'); if (ix?.list) return ix; } catch { /* ignore */ }
+  return null;
 }
-export function load() {
+function writeIndex(ix) { try { localStorage.setItem(INDEX_KEY, JSON.stringify(ix)); } catch { /* storage unavailable */ } }
+function readProject(id) { try { return asProject(JSON.parse(localStorage.getItem(projKey(id)) || 'null')); } catch { return null; } }
+function writeProject(p) {
+  try { localStorage.setItem(projKey(p.id), JSON.stringify(p)); } catch { /* storage unavailable */ }
+  const ix = readIndex() || { list: [] };
+  const e = { id: p.id, name: p.name, rooms: p.rooms.length, updated: Date.now() };
+  const i = ix.list.findIndex((x) => x.id === p.id);
+  if (i >= 0) ix.list[i] = e; else ix.list.push(e);
+  writeIndex(ix);
+}
+// Older saves (one project, or one room) become the first project in the index.
+function migrate() {
+  if (readIndex()) return;
+  let p = null;
   try {
     const raw = localStorage.getItem(PROJECT_KEY);
-    if (raw) { useProject(asProject(JSON.parse(raw))); return true; }
-    const legacy = localStorage.getItem(LS_KEY);
-    if (legacy) { useProject(asProject(JSON.parse(legacy), 'Ensuite')); save(); return true; }
+    if (raw) p = asProject(JSON.parse(raw));
+    else if (localStorage.getItem(LS_KEY)) p = asProject(JSON.parse(localStorage.getItem(LS_KEY)), 'Ensuite');
   } catch { /* ignore */ }
+  if (!p) return;
+  p.id = p.id || uid();
+  writeProject(p);
+  writeIndex({ ...readIndex(), active: p.id });
+}
+
+export function save() {
+  if (store.readOnly || !store.project) return;
+  store.project.id = store.project.id || uid();
+  writeProject(store.project);
+}
+// Load the active project (true), or start a fresh one (false) when there are none yet.
+export function load() {
+  migrate();
+  const ix = readIndex();
+  const id = ix?.active && ix.list.some((x) => x.id === ix.active) ? ix.active : ix?.list[0]?.id;
+  const p = id && readProject(id);
+  if (p) { p.id = id; useProject(p); return true; }
   useProject(makeProject(newDesign()));
   return false;
 }
-export function loadProject(p) { store.readOnly = false; useProject(p); commit('load'); }
+// All saved projects (newest first is up to the caller): [{ id, name, rooms, updated }].
+export function listProjects() { migrate(); return readIndex()?.list || []; }
+function setActiveProject(id) { const ix = readIndex() || { list: [] }; ix.active = id; writeIndex(ix); }
+// Open a project from the list (saving the current one first).
+export function switchProject(id) {
+  if (store.project?.id === id && !store.readOnly) return;
+  save();
+  const p = readProject(id); if (!p) return false;
+  p.id = id;
+  store.readOnly = false;
+  useProject(p); setActiveProject(id); commit('load');
+  return true;
+}
+// Add a project (new, imported or duplicated) and open it.
+export function loadProject(p) {
+  if (!store.readOnly && store.project && listProjects().some((x) => x.id === store.project.id)) save();
+  store.readOnly = false;
+  if (!p.id || listProjects().some((x) => x.id === p.id)) p.id = uid();
+  useProject(p); setActiveProject(p.id); commit('load');
+}
+export function renameProject(name) { if (!name) return; store.project.name = name; commit('rooms'); }
+export function duplicateProject() {
+  const p = JSON.parse(JSON.stringify(store.project));
+  p.id = uid(); p.name = `${store.project.name} copy`;
+  // fresh room ids so share links and history stay with the original
+  for (const r of p.rooms) { const nid = uid(); if (p.active === r.id) p.active = nid; r.id = nid; }
+  loadProject(p);
+}
+// Delete the current project and open another (or a fresh one if it was the last).
+export function deleteProject() {
+  const id = store.project.id;
+  try { localStorage.removeItem(projKey(id)); } catch { /* ignore */ }
+  const ix = readIndex() || { list: [] };
+  ix.list = ix.list.filter((x) => x.id !== id); writeIndex(ix);
+  const next = ix.list[0];
+  if (next) { store.project = null; switchProject(next.id); }
+  else { store.project = null; loadProject(makeProject(newDesign())); }
+}
+// Move (or copy) a room into another project — or a new project if targetId is null. Moving keeps the room's id,
+// so a live share link for that room keeps working from its new project.
+export function moveRoom(roomId, targetId, { copy = false, newName } = {}) {
+  const src = store.project, room = src.rooms.find((r) => r.id === roomId);
+  if (!room) return false;
+  if (!copy && src.rooms.length <= 1) return false;
+  const moved = copy ? { id: uid(), name: room.name, design: JSON.parse(JSON.stringify(room.design)) } : room;
+  let target = targetId ? readProject(targetId) : { version: 2, id: uid(), name: newName || room.name, rooms: [], active: moved.id };
+  if (!target) return false;
+  if (targetId) target.id = targetId;
+  const names = new Set(target.rooms.map((r) => r.name)); let n = 2;
+  while (names.has(moved.name)) moved.name = `${room.name} (${n++})`;
+  target.rooms.push(moved);
+  if (!target.active) target.active = moved.id;
+  writeProject(target);
+  if (!copy) {
+    src.rooms = src.rooms.filter((r) => r.id !== roomId);
+    history.delete(roomId);
+    if (src.active === roomId) { src.active = src.rooms[0].id; const h = history.get(src.active) || { undo: [], redo: [] }; store.undo = h.undo; store.redo = h.redo; store.d = activeRoom().design; store.sel = null; }
+    commit('load');
+  }
+  return target.id;
+}
 // Show someone else's project from a share link without touching the saved one.
 export function viewShared(p) { useProject(p); store.readOnly = true; emit('load'); }
 // Leave the shared view, optionally adding its rooms to the user's own project.
-// Returns the ids of the copied rooms (in the user's project).
+// copyRooms: 'merge' (or true) adds the shared rooms to the user's current project, 'new' saves them as a project
+// of their own. Returns the ids of the copied rooms.
 export function leaveShared(copyRooms = false) {
   const shared = store.project;
   store.readOnly = false;
   const hadOwn = load();
   let ids = [];
-  if (copyRooms && !hadOwn) {
-    // first visit: the shared project simply becomes theirs
-    useProject(JSON.parse(JSON.stringify(shared)));
-    ids = store.project.rooms.map((r) => r.id);
+  if (copyRooms === 'new' || (copyRooms && !hadOwn)) {
+    // its own project (always on a first visit); a fresh id so it can't overwrite the sharer's copy in this browser
+    const p = JSON.parse(JSON.stringify(shared));
+    p.id = uid();
+    if (!hadOwn) store.project = null; // don't keep the blank placeholder
+    loadProject(p);
+    return store.project.rooms.map((r) => r.id);
   } else if (copyRooms) {
     const names = new Set(store.project.rooms.map((r) => r.name));
     for (const r of shared.rooms) {

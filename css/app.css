@@ -165,7 +165,8 @@ body.readonly .ro-hide { display: none !important; }
   .bar-row { gap: 6px; padding: 0 8px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
   .bar-row::-webkit-scrollbar { display: none; }
   .bar-row > * { flex-shrink: 0; }
-  .proj, .panel-toggle .lbl { display: none; }
+  .proj .lbl, .panel-toggle .lbl { display: none; }
+  .proj::before { content: '📁'; }
   .brand { font-size: 0; gap: 0; margin-right: 0; }
   .brand img { width: 26px; height: 26px; }
   .spacer { flex: 0 0 4px; }
@@ -221,3 +222,9 @@ body.readonly .ro-hide { display: none !important; }
 #shareKeyBox { margin: 6px 0; }
 #shareKeyBox summary { cursor: pointer; font-size: 12.5px; color: var(--muted); }
 .share-alt { margin-top: 4px; }
+
+button.proj { background: none; border: 0; font: inherit; font-weight: 600; }
+#projMenu { min-width: 240px; max-height: 70vh; overflow: auto; }
+#projMenu button.on { font-weight: 600; }
+.menu-pop .muted { color: var(--muted); font-weight: 400; }
+.menu-note { font-size: 12px; color: var(--muted); padding: 4px 12px 6px; }
