@@ -59,11 +59,12 @@ function sync() {
     if (rebuild) {
       wb.innerHTML = `<span class="fb-title">Wall ${wall.i + 1}</span>
         <label class="fb-num">Length <input type="number" data-f="len" value="${Math.round(wall.len)}" step="1"> mm</label>
-        <button data-a="door">+ Door</button><button data-a="window">+ Window</button><button data-a="split" title="Add a corner here">Split here</button>`;
+        <button data-a="door">+ Door</button><button data-a="window">+ Window</button><button data-a="split" title="Add a corner here">Split here</button><button data-a="elev" title="Side view of this wall">Elevation</button>`;
       $('[data-f=len]', wb).onchange = (e) => setWallLength(wall.i, num(e.target.value));
       $('[data-f=len]', wb).onkeydown = (e) => { if (e.key === 'Enter') e.target.blur(); };
       wb.querySelector('[data-a=door]').onclick = () => addOpening('door', wall.i, s.t);
       wb.querySelector('[data-a=window]').onclick = () => addOpening('window', wall.i, s.t);
+      wb.querySelector('[data-a=elev]').onclick = () => window.__openElevation?.(wall.i);
       wb.querySelector('[data-a=split]').onclick = () => splitWall(wall.i, { x: wall.a.x + wall.ux * s.t, y: wall.a.y + wall.uy * s.t });
     }
     const t = Math.min(wall.len, Math.max(0, s.t ?? wall.len / 2));

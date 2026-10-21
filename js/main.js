@@ -3,6 +3,9 @@ import { store, on, emit, load, undo, redo, select, itemById, newDesign, replace
 import { shareUrl, sharedToken, resolveShared, publishLive, linkFor, forgetLink, checkEditKey, rememberLink, liveLinks, otherLinksFor, useLinkInstead, linkUrl } from './share.js';
 import { exportGLB, exportOBJ } from './export3d.js';
 import { buildPrint, toSTL, to3MF } from './print3d.js';
+import { elevationCanvas } from './elevation.js';
+import { layoutPages, drawPagePreview, buildPDF, newCache } from './pdfexport.js';
+import { wallsOf } from './geom.js';
 import { initPlan, draw, fit, zoom, setTool, drawKey, exportPNG, addModelAt, plan, applyPlanTheme } from './plan2d.js';
 import { enterVR, vrSupported } from './vr.js';
 import { init3d, rebuildRoom, rebuildItems, updateSelection, onShow, resetCamera, eyeLevel, setCutaway, setCeiling, setReflections, screenshot, applySceneTheme } from './view3d.js';
@@ -337,6 +340,70 @@ async function main() {
   $('#glbBtn').onclick = async () => { fm.classList.remove('open'); toast('Exporting 3D model…'); try { await exportGLB(base(), { ceiling: $('#expCeiling').checked }); toast('Exported .glb'); } catch (e) { console.error(e); toast('Export failed — see console'); } };
   $('#objBtn').onclick = () => { fm.classList.remove('open'); try { exportOBJ(base(), { ceiling: $('#expCeiling').checked }); toast('Exported .obj + .mtl'); } catch (e) { console.error(e); toast('Export failed — see console'); } };
   $('#expCeiling').onclick = (e) => e.stopPropagation();
+  // wall elevations viewer
+  const ed = $('#elevDlg');
+  let elevWall = 0;
+  const drawElev = () => {
+    const n = store.d.room.pts.length; elevWall = Math.min(elevWall, n - 1);
+    $('#elevTabs').innerHTML = wallsOf(store.d.room.pts).map((w, i) => `<button data-w="${i}" class="${i === elevWall ? 'on' : ''}">Wall ${i + 1} · ${Math.round(w.len)}</button>`).join('');
+    const wrap = ed.querySelector('.elev-wrap'), dpr = Math.min(2, window.devicePixelRatio || 1);
+    const probe = elevationCanvas(store.d, elevWall, 0.01, 1); if (!probe) return;
+    const k = Math.min((wrap.clientWidth - 2) / probe.size.w, (window.innerHeight * 0.6) / probe.size.h) * dpr;
+    const r = elevationCanvas(store.d, elevWall, k, 6.5 * dpr * Math.max(0.6, Math.min(1.4, k / dpr / 0.25)));
+    const cv = $('#elevCanvas'); cv.width = r.canvas.width; cv.height = r.canvas.height; cv.getContext('2d').drawImage(r.canvas, 0, 0);
+    cv.style.width = `${r.canvas.width / dpr}px`; cv.style.height = 'auto';
+    $('#elevNote').textContent = `Looking at wall ${elevWall + 1} from inside the room · dimensions in mm · ${r.el.ops.length} opening${r.el.ops.length === 1 ? '' : 's'}, ${r.el.items.length} fitting${r.el.items.length === 1 ? '' : 's'} on this wall`;
+  };
+  const openElev = (i = elevWall) => { elevWall = i; ed.hidden = false; requestAnimationFrame(drawElev); };
+  window.__openElevation = openElev;
+  $('#elevBtn').onclick = () => openElev(store.sel?.type === 'wall' ? store.sel.index : elevWall);
+  $('#elevTabs').addEventListener('click', (e) => { const b = e.target.closest('[data-w]'); if (b) { elevWall = +b.dataset.w; drawElev(); } });
+  ed.addEventListener('click', (e) => { if (e.target.matches('[data-close]') || e.target === ed) ed.hidden = true; });
+  on((kind) => { if (!ed.hidden && kind !== 'select' && kind !== 'tool') drawElev(); });
+  window.addEventListener('resize', () => { if (!ed.hidden) drawElev(); });
+
+  // PDF export
+  const pdd = $('#pdfDlg');
+  const pdfOpts = () => {
+    const q = (k) => pdd.querySelector(`[data-q="${k}"]`);
+    return { plan: q('plan').checked, elev: q('elev').checked, view3d: q('view3d').checked, scope: q('scope').value, paper: q('paper').value, scale: q('scale').value };
+  };
+  let previewRun = 0;
+  const pdfPreview = async () => {
+    const run = ++previewRun, o = pdfOpts();
+    const lay = layoutPages(o), box = $('#pdfPreview');
+    $('#pdfGo').disabled = !lay.pages.length;
+    $('#pdfInfo').innerHTML = lay.pages.length ? `${lay.pages.length} page${lay.pages.length > 1 ? 's' : ''} on ${o.paper.toUpperCase()}. Drawings are at true scale — print at 100% ("actual size") to measure off them.${lay.notes.length ? '<br><b>' + lay.notes.join('<br>') + '</b>' : ''}` : 'Choose something to include.';
+    box.innerHTML = '';
+    const cache = newCache();
+    for (const page of lay.pages) {
+      if (run !== previewRun) return;
+      const k = 220 / Math.max(page.pw, page.ph);
+      const cv = await drawPagePreview(page, k * 2, cache);
+      if (run !== previewRun) return;
+      cv.style.width = `${page.pw * k}px`;
+      const wrap = document.createElement('div'); wrap.innerHTML = `<div class="pg"></div><div class="cap">${page.n}. ${esc(page.sub.split(' · ')[0])}${o.scope === 'project' ? ' — ' + esc(page.title.split(' · ').pop()) : ''}</div>`;
+      wrap.firstChild.appendChild(cv); box.appendChild(wrap);
+      await new Promise((r) => setTimeout(r, 0));
+    }
+  };
+  const openPdf = () => { fm.classList.remove('open'); ed.hidden = true; pdd.hidden = false; pdfPreview(); };
+  $('#pdfBtn').onclick = openPdf;
+  $('#elevPdf').onclick = () => { pdd.querySelector('[data-q="plan"]').checked = false; pdd.querySelector('[data-q="elev"]').checked = true; openPdf(); };
+  pdd.querySelectorAll('[data-q]').forEach((el) => el.addEventListener('change', pdfPreview));
+  pdd.addEventListener('click', (e) => { if (e.target.matches('[data-close]') || e.target === pdd) pdd.hidden = true; });
+  $('#pdfGo').onclick = async () => {
+    const o = pdfOpts(), lay = layoutPages(o);
+    $('#pdfGo').disabled = true; $('#pdfGo').textContent = 'Making PDF…';
+    try {
+      const doc = await buildPDF(lay);
+      const name = o.scope === 'project' ? slug(store.project.name) : base();
+      doc.save(`${name}.pdf`);
+      toast(`Exported ${name}.pdf`);
+    } catch (err) { console.error(err); toast(err.message || 'PDF export failed'); }
+    finally { $('#pdfGo').disabled = false; $('#pdfGo').textContent = 'Download PDF'; }
+  };
+
   // 3D print export
   const pd = $('#printDlg');
   const printOpts = () => {
@@ -360,11 +427,6 @@ async function main() {
     const url = URL.createObjectURL(blob);
     download(`${name}.${o.format}`, url); setTimeout(() => URL.revokeObjectURL(url), 5000);
     toast(`Exported ${name}.${o.format}`);
-  };
-  $('#tplMenu').innerHTML = TEMPLATES.map((t) => `<button data-tpl="${t.id}">Replace with template: ${t.name}</button>`).join('');
-  $('#tplMenu').onclick = (e) => {
-    const b = e.target.closest('[data-tpl]'); if (!b) return;
-    replaceDesign(TEMPLATES.find((t) => t.id === b.dataset.tpl).make()); fit(); resetCamera(); fm.classList.remove('open'); toast('Template loaded — Undo to go back');
   };
   $('#saveBtn').onclick = () => { download(slug(store.project.name) + '.json', 'data:application/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(store.project, null, 1))); fm.classList.remove('open'); };
   $('#openInput').onchange = async (e) => {
@@ -426,7 +488,7 @@ async function main() {
 }
 
 // Shared (view-only) mode: banner, and hide anything that edits or saves.
-const RO_HIDE = ['#undoBtn', '#redoBtn', '#roomBtn', '#projBtn', '#toolNote', '#toolDraw', '#newBtn', '#saveBtn', '#tplMenu'];
+const RO_HIDE = ['#undoBtn', '#redoBtn', '#roomBtn', '#projBtn', '#toolNote', '#toolDraw', '#newBtn', '#saveBtn'];
 function syncReadOnly() {
   const ro = store.readOnly;
   document.body.classList.toggle('readonly', ro);

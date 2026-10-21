@@ -1256,19 +1256,26 @@ function hud() {
   el.textContent = s;
 }
 
-export function exportPNG() {
+// Draw a room's plan onto a new canvas at pxPerMm (real mm), with padMm around the walls for dimensions.
+// Always the light palette (for printing/sharing). Returns { canvas, x0, y0, w, h } (plan mm covered).
+export function renderPlanCanvas(design = store.d, pxPerMm = 0.5, padMm = 400) {
   const c = document.createElement('canvas');
-  const b = polyBounds(store.d.room.pts);
-  const scale = 0.5; // px per mm
-  const pad = 400;
-  c.width = (b.w + pad * 2) * scale; c.height = (b.h + pad * 2) * scale;
-  const saved = { scale: plan.scale, ox: plan.ox, oy: plan.oy, dpr: plan.dpr, canvas: plan.canvas };
-  // exports are for printing/sharing: always the light palette
+  const outer = outerPts(design.room.pts, design.room.thickness);
+  const b = polyBounds(outer);
+  c.width = Math.ceil((b.w + padMm * 2) * pxPerMm); c.height = Math.ceil((b.h + padMm * 2) * pxPerMm);
+  const saved = { scale: plan.scale, ox: plan.ox, oy: plan.oy, dpr: plan.dpr, canvas: plan.canvas, sel: store.sel, d: store.d, hover: plan.hover };
   const savedTheme = { ...TH };
-  Object.assign(TH, { bg: '#fbfbfa', floor: '#f3f1ec', wall: WALL, dim: DIM, tile: 'rgba(0,0,0,0.06)', grid1: 'rgba(0,0,0,0.035)', grid2: 'rgba(0,0,0,0.08)', labelBg: 'rgba(251,251,250,0.92)' });
-  Object.assign(plan, { scale, ox: (pad - b.x0) * scale, oy: (pad - b.y0) * scale, dpr: 1, canvas: c });
-  render(c.getContext('2d'), true);
-  Object.assign(plan, saved);
-  Object.assign(TH, savedTheme);
-  return c.toDataURL('image/png');
+  Object.assign(TH, { bg: '#ffffff', floor: '#f3f1ec', wall: WALL, dim: DIM, tile: 'rgba(0,0,0,0.06)', grid1: 'rgba(0,0,0,0)', grid2: 'rgba(0,0,0,0)', labelBg: 'rgba(255,255,255,0.92)' });
+  Object.assign(plan, { scale: pxPerMm, ox: (padMm - b.x0) * pxPerMm, oy: (padMm - b.y0) * pxPerMm, dpr: 1, canvas: c, hover: null });
+  store.d = design; store.sel = null;
+  try { render(c.getContext('2d'), true); } finally {
+    store.d = saved.d; store.sel = saved.sel;
+    Object.assign(plan, { scale: saved.scale, ox: saved.ox, oy: saved.oy, dpr: saved.dpr, canvas: saved.canvas, hover: saved.hover });
+    Object.assign(TH, savedTheme);
+  }
+  return { canvas: c, x0: b.x0 - padMm, y0: b.y0 - padMm, w: b.w + padMm * 2, h: b.h + padMm * 2 };
+}
+
+export function exportPNG() {
+  return renderPlanCanvas(store.d, 0.5, 400).canvas.toDataURL('image/png');
 }

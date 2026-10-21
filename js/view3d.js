@@ -205,6 +205,33 @@ export function resetCamera() {
   v3.camera.fov = 50; v3.camera.updateProjectionMatrix();
   v3.controls.update(); updateCutaway(); requestRender();
 }
+// Render a room's standard 3D overview at w × h px and return it as a JPEG data URL, leaving the live view as it was.
+// The room can be any design (e.g. another room in the project for a PDF); it's swapped in only for the shot.
+export function snapshot3D(design, w, h) {
+  if (!v3.ready) return '';
+  const { renderer, camera, controls, scene } = v3;
+  const saved = { d: store.d, sel: store.sel, pos: camera.position.clone(), target: controls.target.clone(), fov: camera.fov, aspect: camera.aspect, pr: renderer.getPixelRatio(), size: renderer.getSize(new THREE.Vector2()), bg: scene.background };
+  const other = design !== store.d;
+  try {
+    store.d = design; store.sel = null;
+    if (other) { rebuildRoom(); rebuildItems(); }
+    v3.selBox.visible = false;
+    renderer.setPixelRatio(1); renderer.setSize(w, h, false);
+    camera.aspect = w / h; camera.updateProjectionMatrix();
+    resetCamera();
+    scene.background = new THREE.Color('#ffffff');
+    renderer.render(scene, camera);
+    return renderer.domElement.toDataURL('image/jpeg', 0.9);
+  } finally {
+    store.d = saved.d; store.sel = saved.sel; scene.background = saved.bg;
+    renderer.setPixelRatio(saved.pr); renderer.setSize(saved.size.x, saved.size.y, false);
+    camera.aspect = saved.aspect; camera.fov = saved.fov; camera.position.copy(saved.pos); controls.target.copy(saved.target);
+    camera.updateProjectionMatrix(); controls.update();
+    if (other) { rebuildRoom(); rebuildItems(); }
+    updateSelection(); updateCutaway(); requestRender();
+  }
+}
+
 // Where to stand (metres): just inside the door if there is one, else near the "front" wall, looking across the room.
 export function standSpot() {
   const b = polyBounds(store.d.room.pts);

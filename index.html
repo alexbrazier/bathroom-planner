@@ -63,7 +63,7 @@
       <button id="saveBtn">Save project (.json)</button>
       <label class="as-btn">Open project…<input type="file" id="openInput" accept=".json,application/json" hidden></label>
       <div class="menu-sep">This room</div>
-      <div id="tplMenu"></div>
+      <button id="pdfBtn">Export PDF (plan, elevations, 3D)…</button>
       <button id="pngBtn">Export 2D plan (.png)</button>
       <button id="shotBtn">Export 3D view image (.png)</button>
       <button id="glbBtn">Export 3D model (.glb) — Twinmotion, Blender, SketchUp</button>
@@ -85,6 +85,7 @@
     <button id="toolRoom" title="Edit walls, corners, doors and windows (E)">Edit room</button>
     <button id="toolMeasure" title="Measure distance (M)">Measure</button>
     <button id="toolNote" title="Add notes to the plan (N)">Note</button>
+    <button id="elevBtn" title="Side views of each wall: windows, doors and fittings at their real heights">Elevations</button>
     <button id="toolDraw" title="Draw room outline by clicking corners">Draw room</button>
   </div>
   <div class="spacer"></div>
@@ -139,6 +140,37 @@
 
   <aside id="props"></aside>
 </main>
+
+<div id="elevDlg" class="modal" hidden>
+  <div class="modal-card elev-card">
+    <div class="modal-head"><h2>Wall elevations</h2><button class="x" data-close>×</button></div>
+    <div id="elevTabs" class="elev-tabs"></div>
+    <div class="elev-wrap"><canvas id="elevCanvas"></canvas></div>
+    <p class="note" id="elevNote"></p>
+    <div class="btns"><button id="elevPdf">Export PDF…</button></div>
+  </div>
+</div>
+
+<div id="pdfDlg" class="modal" hidden>
+  <div class="modal-card pdf-card">
+    <div class="modal-head"><h2>Export PDF</h2><button class="x" data-close>×</button></div>
+    <div class="pdf-grid">
+      <div class="pdf-opts">
+        <div class="fld"><span>Include</span>
+          <label class="row"><input type="checkbox" data-q="plan" checked> Plan</label>
+          <label class="row"><input type="checkbox" data-q="elev" checked> Wall elevations</label>
+          <label class="row"><input type="checkbox" data-q="view3d"> 3D view</label>
+        </div>
+        <div class="fld"><span>Rooms</span><select data-q="scope"><option value="room" selected>This room</option><option value="project">Whole project</option></select></div>
+        <div class="fld"><span>Paper</span><select data-q="paper"><option value="a4" selected>A4</option><option value="a3">A3</option></select></div>
+        <div class="fld"><span>Scale</span><select data-q="scale"><option value="auto" selected>Fit to the page</option><option value="20">1:20</option><option value="25">1:25</option><option value="50">1:50</option><option value="100">1:100</option></select></div>
+        <p class="note" id="pdfInfo"></p>
+        <div class="btns"><button id="pdfGo" class="primary">Download PDF</button></div>
+      </div>
+      <div class="pdf-preview" id="pdfPreview"></div>
+    </div>
+  </div>
+</div>
 
 <div id="printDlg" class="modal" hidden>
   <div class="modal-card print-card">
