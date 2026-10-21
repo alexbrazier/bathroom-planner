@@ -6,7 +6,7 @@ import { buildPrint, toSTL, to3MF } from './print3d.js';
 import { elevationCanvas } from './elevation.js';
 import { layoutPages, drawPagePreview, buildPDF, newCache } from './pdfexport.js';
 import { wallsOf } from './geom.js';
-import { initPlan, draw, fit, zoom, setTool, drawKey, exportPNG, addModelAt, plan, applyPlanTheme } from './plan2d.js';
+import { initPlan, draw, fit, zoom, setTool, drawKey, exportPNG, addModelAt, plan, applyPlanTheme, setDimDetail } from './plan2d.js';
 import { enterVR, vrSupported } from './vr.js';
 import { init3d, rebuildRoom, rebuildItems, updateSelection, onShow, resetCamera, eyeLevel, setCutaway, setCeiling, setReflections, screenshot, applySceneTheme } from './view3d.js';
 import { reflectionsOn } from './mirrors.js';
@@ -366,7 +366,7 @@ async function main() {
   const pdd = $('#pdfDlg');
   const pdfOpts = () => {
     const q = (k) => pdd.querySelector(`[data-q="${k}"]`);
-    return { plan: q('plan').checked, elev: q('elev').checked, view3d: q('view3d').checked, scope: q('scope').value, paper: q('paper').value, scale: q('scale').value };
+    return { plan: q('plan').checked, elev: q('elev').checked, view3d: q('view3d').checked, dims: q('dims').checked, scope: q('scope').value, paper: q('paper').value, scale: q('scale').value };
   };
   let previewRun = 0;
   const pdfPreview = async () => {
@@ -387,8 +387,11 @@ async function main() {
       await new Promise((r) => setTimeout(r, 0));
     }
   };
-  const openPdf = () => { fm.classList.remove('open'); ed.hidden = true; pdd.hidden = false; pdfPreview(); };
+  const openPdf = () => { fm.classList.remove('open'); ed.hidden = true; pdd.hidden = false; pdd.querySelector('[data-q="dims"]').checked = plan.dimDetail; pdfPreview(); };
   $('#pdfBtn').onclick = openPdf;
+  const dimBtn = $('#dimBtn'), syncDim = () => { dimBtn.setAttribute('aria-pressed', String(plan.dimDetail)); dimBtn.classList.toggle('active', plan.dimDetail); };
+  dimBtn.onclick = () => { setDimDetail(!plan.dimDetail); syncDim(); };
+  syncDim();
   $('#elevPdf').onclick = () => { pdd.querySelector('[data-q="plan"]').checked = false; pdd.querySelector('[data-q="elev"]').checked = true; openPdf(); };
   pdd.querySelectorAll('[data-q]').forEach((el) => el.addEventListener('change', pdfPreview));
   pdd.addEventListener('click', (e) => { if (e.target.matches('[data-close]') || e.target === pdd) pdd.hidden = true; });

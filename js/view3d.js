@@ -205,8 +205,9 @@ export function resetCamera() {
   v3.camera.fov = 50; v3.camera.updateProjectionMatrix();
   v3.controls.update(); updateCutaway(); requestRender();
 }
-// Render a room's standard 3D overview at w × h px and return it as a JPEG data URL, leaving the live view as it was.
-// The room can be any design (e.g. another room in the project for a PDF); it's swapped in only for the shot.
+// Render a room at w × h px and return it as a JPEG data URL, leaving the live view as it was. The room on screen
+// is shot from the current camera; any other design (e.g. another room in the project for a PDF) is swapped in
+// only for the shot and gets the standard overview.
 export function snapshot3D(design, w, h) {
   if (!v3.ready) return '';
   const { renderer, camera, controls, scene } = v3;
@@ -217,8 +218,13 @@ export function snapshot3D(design, w, h) {
     if (other) { rebuildRoom(); rebuildItems(); }
     v3.selBox.visible = false;
     renderer.setPixelRatio(1); renderer.setSize(w, h, false);
-    camera.aspect = w / h; camera.updateProjectionMatrix();
-    resetCamera();
+    camera.aspect = w / h;
+    if (other) resetCamera();
+    else if (w / h < saved.aspect) {
+      // the current view, widened vertically so a narrower page doesn't crop its sides
+      camera.fov = 2 * Math.atan(Math.tan(saved.fov * Math.PI / 360) * saved.aspect / (w / h)) * 180 / Math.PI;
+    }
+    camera.updateProjectionMatrix();
     scene.background = new THREE.Color('#ffffff');
     renderer.render(scene, camera);
     return renderer.domElement.toDataURL('image/jpeg', 0.9);

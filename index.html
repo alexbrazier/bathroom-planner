@@ -85,6 +85,7 @@
     <button id="toolRoom" title="Edit walls, corners, doors and windows (E)">Edit room</button>
     <button id="toolMeasure" title="Measure distance (M)">Measure</button>
     <button id="toolNote" title="Add notes to the plan (N)">Note</button>
+    <button id="dimBtn" aria-pressed="false" title="Chained dimensions along each wall: fittings on the wall and door/window positions">Dims</button>
     <button id="elevBtn" title="Side views of each wall: windows, doors and fittings at their real heights">Elevations</button>
     <button id="toolDraw" title="Draw room outline by clicking corners">Draw room</button>
   </div>
@@ -160,6 +161,7 @@
           <label class="row"><input type="checkbox" data-q="plan" checked> Plan</label>
           <label class="row"><input type="checkbox" data-q="elev" checked> Wall elevations</label>
           <label class="row"><input type="checkbox" data-q="view3d"> 3D view</label>
+          <label class="row"><input type="checkbox" data-q="dims"> Detailed wall dimensions on the plan</label>
         </div>
         <div class="fld"><span>Rooms</span><select data-q="scope"><option value="room" selected>This room</option><option value="project">Whole project</option></select></div>
         <div class="fld"><span>Paper</span><select data-q="paper"><option value="a4" selected>A4</option><option value="a3">A3</option></select></div>

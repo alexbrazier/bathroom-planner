@@ -11,7 +11,9 @@ const PAPER = { a4: [297, 210], a3: [420, 297] }; // landscape mm
 const MARGIN = 10, TITLE = 16;
 const SCALES = [10, 20, 25, 50, 100, 200];
 const PX_PER_MM = 6; // image resolution on paper (~150 dpi)
-const PLAN_PAD = 450;
+// room for the dimension lines around a plan: paper mm, so it's the same on the page at any scale
+const planPad = (scale, dims) => (dims ? 25 : 13) * scale;
+const PLAN_UI = 1.5; // plan text and lines 1.5× their on-screen size, so labels print at ~8pt
 
 const today = () => new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 const area = (paper, portrait) => { const [w, h] = portrait ? [PAPER[paper][1], PAPER[paper][0]] : PAPER[paper]; return { pw: w, ph: h, w: w - 2 * MARGIN, h: h - 2 * MARGIN - TITLE }; };
@@ -39,11 +41,16 @@ export function layoutPages(opts) {
     if (opts.plan) {
       const pts = d.room.pts.map((p) => p);
       const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y), th = d.room.thickness;
-      const rw = Math.max(...xs) - Math.min(...xs) + 2 * (th + PLAN_PAD), rh = Math.max(...ys) - Math.min(...ys) + 2 * (th + PLAN_PAD);
-      const sc = pickScale(rw, rh, opts.paper, opts.scale);
+      const ext = (sc) => ({ rw: Math.max(...xs) - Math.min(...xs) + 2 * (th + planPad(sc, opts.dims)), rh: Math.max(...ys) - Math.min(...ys) + 2 * (th + planPad(sc, opts.dims)) });
+      // the padding grows with the scale, so try each scale with its own padding
+      const fits = (x) => { const e = ext(x); return !pickScale(e.rw, e.rh, opts.paper, String(x)).forced; };
+      const want = opts.scale === 'auto' ? null : +opts.scale;
+      const pick = SCALES.find((x) => (want ? x >= want : true) && fits(x)) || SCALES[SCALES.length - 1];
+      const { rw, rh } = ext(pick);
+      const sc = { ...pickScale(rw, rh, opts.paper, String(pick)), ...(want && pick !== want ? { forced: true, wanted: want } : {}) };
       if (sc.forced) notes.push(`${room.name} plan doesn't fit at 1:${sc.wanted} — used 1:${sc.scale}.`);
       const a = area(opts.paper, sc.portrait);
-      const img = { kind: 'plan', design: d, scale: sc.scale };
+      const img = { kind: 'plan', design: d, scale: sc.scale, dims: !!opts.dims };
       const w = rw / sc.scale, h = rh / sc.scale;
       pages.push({ ...a, title, sub: `Plan · 1:${sc.scale}`, scale: sc.scale, parts: [{ ...img, x: MARGIN + (a.w - w) / 2, y: MARGIN + (a.h - h) / 2, w, h }] });
     }
@@ -77,10 +84,10 @@ export function layoutPages(opts) {
 
 // ---- part images (cached per export run)
 function partImage(part, cache) {
-  const key = part.kind === 'plan' ? `plan:${part.scale}:${cache.id(part.design)}` : part.kind === 'elev' ? `elev:${part.scale}:${cache.id(part.design)}:${part.wall}` : `3d:${cache.id(part.design)}`;
+  const key = part.kind === 'plan' ? `plan:${part.scale}:${part.dims}:${cache.id(part.design)}` : part.kind === 'elev' ? `elev:${part.scale}:${cache.id(part.design)}:${part.wall}` : `3d:${cache.id(part.design)}`;
   if (cache.map.has(key)) return cache.map.get(key);
   let img;
-  if (part.kind === 'plan') img = renderPlanCanvas(part.design, PX_PER_MM / part.scale, PLAN_PAD).canvas;
+  if (part.kind === 'plan') img = renderPlanCanvas(part.design, PX_PER_MM / part.scale, planPad(part.scale, part.dims), part.dims, PLAN_UI).canvas;
   else if (part.kind === 'elev') img = elevationCanvas(part.design, part.wall, PX_PER_MM / part.scale, PX_PER_MM).canvas;
   else {
     const aspect = part.w / part.h, pw = 1800;

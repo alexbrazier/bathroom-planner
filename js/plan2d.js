@@ -29,7 +29,13 @@ export const plan = {
   drawInput: '',
   cursor: null,
   spaceDown: false,
+  dimDetail: (() => { try { return localStorage.getItem('bathroom-designer:dimDetail') === '1'; } catch { return false; } })(),
 };
+export function setDimDetail(on) {
+  plan.dimDetail = !!on;
+  try { localStorage.setItem('bathroom-designer:dimDetail', on ? '1' : '0'); } catch {}
+  draw();
+}
 
 const W2S = (p) => ({ x: p.x * plan.scale + plan.ox, y: p.y * plan.scale + plan.oy });
 const S2W = (x, y) => ({ x: (x - plan.ox) / plan.scale, y: (y - plan.oy) / plan.scale });
@@ -171,7 +177,7 @@ export function render(ctx, forExport) {
   }
 
   // wall dimensions
-  walls.forEach((w) => wallDim(ctx, w, d.room.thickness, px));
+  walls.forEach((w) => wallDim(ctx, w, d.room.thickness, px, plan.dimDetail ? wallChains(d, w) : null));
 
   // vertices (room mode shows them all)
   if (!forExport) {
@@ -296,8 +302,70 @@ function dimLine(ctx, a, b, px, color = TH.dim, label, offsetPx = 0) {
   if (label != null) text(ctx, label, (A.x + B.x) / 2, (A.y + B.y) / 2, px, { color, bg: TH.labelBg, angle: readableAngle(Math.atan2(dy, dx)) });
 }
 
-function wallDim(ctx, w, th, px) {
-  const off = th + 24 * px;
+// Chains of positions along a wall (mm from its start) for detailed dimensions: the edges of the fittings on the
+// wall (anything touching it, or touching boxing that's on it; niches left out) and the jambs of its doors/windows.
+const TOUCH = 20;
+function wallChains(d, w) {
+  const th = d.room.thickness;
+  const geo = d.items.filter((it) => modelOf(it)?.kind !== 'niche').map((it) => {
+    const s = sizeOf(it), cs = itemCorners(it, s.w, s.d);
+    const ts = cs.map((p) => (p.x - w.a.x) * w.ux + (p.y - w.a.y) * w.uy), ns = cs.map((p) => (p.x - w.a.x) * w.nx + (p.y - w.a.y) * w.ny);
+    // facing: the item's back is against this wall (not just an end butting into it)
+    const facing = Math.abs(-Math.sin(rad(it.rot)) * w.nx + Math.cos(rad(it.rot)) * w.ny) > 0.9;
+    return { it, s, facing, kind: modelOf(it)?.kind, t0: Math.min(...ts), t1: Math.max(...ts), n0: Math.min(...ns) };
+  });
+  const on = new Set(geo.filter((g) => g.facing && g.n0 <= TOUCH && g.n0 >= -th - 5 && g.t1 > 1 && g.t0 < w.len - 1));
+  // fittings fixed to boxing that's on the wall count too (boxing on boxing as well)
+  const isBox = (g) => g.kind === 'falsewall' || g.kind === 'box';
+  const touches = (g, b) => {
+    const ls = itemCorners(g.it, g.s.w, g.s.d).map((p) => toLocal(b.it, p));
+    const xs = ls.map((p) => p.x), ys = ls.map((p) => p.y);
+    return Math.min(...xs) <= b.s.w / 2 + TOUCH && Math.max(...xs) >= -b.s.w / 2 - TOUCH && Math.min(...ys) <= b.s.d / 2 + TOUCH && Math.max(...ys) >= -b.s.d / 2 - TOUCH;
+  };
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const b of [...on].filter(isBox)) for (const g of geo) if (!on.has(g) && g.facing && touches(g, b)) { on.add(g); grew = true; }
+  }
+  const chain = (ranges) => {
+    if (!ranges.length) return null;
+    const ts = [0, w.len];
+    for (const [a, b] of ranges) ts.push(Math.max(0, Math.min(w.len, a)), Math.max(0, Math.min(w.len, b)));
+    ts.sort((a, b) => a - b);
+    return ts.filter((t, i) => i === 0 || t - ts[i - 1] > 4);
+  };
+  return {
+    fit: chain([...on].map((g) => [g.t0, g.t1])),
+    open: chain(d.openings.filter((o) => o.wall === w.i).map((o) => [o.offset, o.offset + o.width])),
+  };
+}
+
+// A chained dimension outside the wall at `off` (mm out from the inner face); short spans get their labels staggered.
+function chainDim(ctx, w, ts, off, px) {
+  const at = (t, o = off) => ({ x: w.a.x + w.ux * t - w.nx * o, y: w.a.y + w.uy * t - w.ny * o });
+  const A = at(ts[0]), B = at(ts[ts.length - 1]);
+  ctx.strokeStyle = TH.dim; ctx.lineWidth = px;
+  ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(B.x, B.y);
+  const t = 4 * px;
+  for (const tt of ts) { const P = at(tt); ctx.moveTo(P.x + (w.ux - w.nx) * t, P.y + (w.uy - w.ny) * t); ctx.lineTo(P.x - (w.ux - w.nx) * t, P.y - (w.uy - w.ny) * t); }
+  ctx.stroke();
+  const ang = readableAngle(Math.atan2(w.uy, w.ux));
+  // labels that don't fit their span go just outside the line, in rows either side, wherever there's space
+  const rows = [9, -9, 18, -18].map((dy) => ({ dy, end: -Infinity }));
+  for (let i = 1; i < ts.length; i++) {
+    const len = ts[i] - ts[i - 1], label = `${Math.round(len)}`, mid = (ts[i - 1] + ts[i]) / 2;
+    if (len / px >= label.length * 6.5 + 8) { const P = at(mid); text(ctx, label, P.x, P.y, px, { color: TH.dim, bg: TH.labelBg, angle: ang }); continue; }
+    const half = (label.length * 5.6 + 3) * px / 2;
+    const row = rows.find((r) => r.end < mid - half) || rows.reduce((a, b) => (a.end < b.end ? a : b));
+    row.end = mid + half;
+    const P = at(mid, off + row.dy * px);
+    text(ctx, label, P.x, P.y, px, { color: TH.dim, angle: ang, size: 9.5 });
+  }
+}
+
+function wallDim(ctx, w, th, px, chains) {
+  const levels = chains ? [chains.fit, chains.open].filter((c) => c && c.length > 2) : [];
+  levels.forEach((ts, k) => chainDim(ctx, w, ts, th + (24 + 26 * k) * px, px));
+  const off = th + (24 + 26 * levels.length) * px;
   const a = { x: w.a.x - w.nx * off, y: w.a.y - w.ny * off }, b = { x: w.b.x - w.nx * off, y: w.b.y - w.ny * off };
   ctx.strokeStyle = 'rgba(91,100,112,0.35)'; ctx.lineWidth = px;
   ctx.beginPath(); ctx.moveTo(w.a.x - w.nx * th, w.a.y - w.ny * th); ctx.lineTo(a.x - w.nx * 5 * px, a.y - w.ny * 5 * px);
@@ -1258,19 +1326,20 @@ function hud() {
 
 // Draw a room's plan onto a new canvas at pxPerMm (real mm), with padMm around the walls for dimensions.
 // Always the light palette (for printing/sharing). Returns { canvas, x0, y0, w, h } (plan mm covered).
-export function renderPlanCanvas(design = store.d, pxPerMm = 0.5, padMm = 400) {
+// ui scales the line weights and text (e.g. 1.5 for print) without changing the drawing's scale.
+export function renderPlanCanvas(design = store.d, pxPerMm = 0.5, padMm = 400, dimDetail = plan.dimDetail, ui = 1) {
   const c = document.createElement('canvas');
   const outer = outerPts(design.room.pts, design.room.thickness);
   const b = polyBounds(outer);
   c.width = Math.ceil((b.w + padMm * 2) * pxPerMm); c.height = Math.ceil((b.h + padMm * 2) * pxPerMm);
-  const saved = { scale: plan.scale, ox: plan.ox, oy: plan.oy, dpr: plan.dpr, canvas: plan.canvas, sel: store.sel, d: store.d, hover: plan.hover };
+  const saved = { scale: plan.scale, ox: plan.ox, oy: plan.oy, dpr: plan.dpr, canvas: plan.canvas, sel: store.sel, d: store.d, hover: plan.hover, dimDetail: plan.dimDetail };
   const savedTheme = { ...TH };
   Object.assign(TH, { bg: '#ffffff', floor: '#f3f1ec', wall: WALL, dim: DIM, tile: 'rgba(0,0,0,0.06)', grid1: 'rgba(0,0,0,0)', grid2: 'rgba(0,0,0,0)', labelBg: 'rgba(255,255,255,0.92)' });
-  Object.assign(plan, { scale: pxPerMm, ox: (padMm - b.x0) * pxPerMm, oy: (padMm - b.y0) * pxPerMm, dpr: 1, canvas: c, hover: null });
+  Object.assign(plan, { scale: pxPerMm / ui, ox: (padMm - b.x0) * pxPerMm / ui, oy: (padMm - b.y0) * pxPerMm / ui, dpr: ui, canvas: c, hover: null, dimDetail });
   store.d = design; store.sel = null;
   try { render(c.getContext('2d'), true); } finally {
     store.d = saved.d; store.sel = saved.sel;
-    Object.assign(plan, { scale: saved.scale, ox: saved.ox, oy: saved.oy, dpr: saved.dpr, canvas: saved.canvas, hover: saved.hover });
+    Object.assign(plan, { scale: saved.scale, ox: saved.ox, oy: saved.oy, dpr: saved.dpr, canvas: saved.canvas, hover: saved.hover, dimDetail: saved.dimDetail });
     Object.assign(TH, savedTheme);
   }
   return { canvas: c, x0: b.x0 - padMm, y0: b.y0 - padMm, w: b.w + padMm * 2, h: b.h + padMm * 2 };
