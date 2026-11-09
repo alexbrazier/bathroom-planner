@@ -291,9 +291,10 @@ export function surfacesOf(design, project) {
 const phases = (lo, hi, t, p) => { const c = (lo + hi) / 2; return [lo, hi - t, c - t / 2, c + (p - t) / 2]; };
 
 // Tiles over polys (holes already cut out). Every combination of start points is laid out; a layout is "good" when
-// no cut is thinner than a third of the tile (or 150 mm), and the good layout needing the fewest tiles wins — so
-// slivers beside doors, windows and boxing are avoided as well as at the corners. If no layout is good, the one
-// whose thinnest cut is widest wins. Returns { area (mm²), pieces: [{ w, h, full }], cells: [{ x, y, full }], tw, th }.
+// no cut is thinner than a third of the tile (or 150 mm), and the good layout with the fewest pieces (the biggest
+// pieces, fewest joints) wins, then the one needing fewest tiles — a face is never chopped into strips just to get
+// more pieces out of each tile. Slivers beside doors, windows and boxing are avoided as well as at the corners.
+// If no layout is good, the one whose thinnest cut is widest wins. Returns { area (mm²), pieces: [{ w, h, full }], cells: [{ x, y, full }], tw, th }.
 export function layTiles(polys, tile) {
   const { w: tw, h: th } = laidSize(tile), g = Math.max(0, +tile.joint || 0), shift = PATTERNS[tile.pattern]?.shift || 0;
   const area = polys.reduce((s, p) => s + areaOf(p), 0);
@@ -336,7 +337,7 @@ export function layTiles(polys, tile) {
     const L = at(fu, fv); L.order = order++;
     if (!best) { best = L; continue; }
     const better = L.ok !== best.ok ? L.ok
-      : L.ok ? L.tiles < best.tiles || (L.tiles === best.tiles && L.pieces.length < best.pieces.length)
+      : L.ok ? L.pieces.length < best.pieces.length || (L.pieces.length === best.pieces.length && L.tiles < best.tiles)
       : L.thin > best.thin + 0.5 || (Math.abs(L.thin - best.thin) <= 0.5 && L.tiles < best.tiles);
     if (better) best = L;
   }
