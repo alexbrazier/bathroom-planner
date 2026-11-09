@@ -103,7 +103,12 @@ function libraryHtml() {
     <div class="btns"><button data-act="addTile" class="primary">Add a tile</button></div>
     <label class="row tile-chk"><input type="checkbox" data-act="reuse" ${reuse ? 'checked' : ''}> Use offcuts for other cut pieces</label>
     <p class="note">With this on, a cut piece is taken from an offcut only when the offcut holds the <i>whole</i> piece in one go (after a
-      ${3} mm saw cut) — pieces are never made up from scraps. Turn it off to count a fresh tile for every cut piece (the most cautious).</p>`;
+      ${3} mm saw cut) — pieces are never made up from scraps, and offcuts can go to any surface in the same room (each room's
+      cutting list shows where). Turn it off to count a fresh tile for every cut piece (the most cautious).</p>
+    <label class="row tile-chk">Tile + adhesive thickness at corners <input type="number" data-act="buildUp" value="${+store.project.tileOpts?.buildUp || 0}" min="0" max="40" step="1"> mm</label>
+    <p class="note">Room sizes here are to the plaster. Where two tiled faces meet in a corner, one runs into the corner and the other stops
+      against its tiles, so it's this much shorter — a 1212 mm wall between two tiled walls takes a 1200 tile with 12 mm build-up.
+      Leave it at 0 if you've drawn the rooms to the finished tile faces. Usually 10–15 mm (tile thickness plus 3–5 mm adhesive).</p>`;
 }
 
 function scheduleTable(rows, { project = false } = {}) {
@@ -150,6 +155,7 @@ function roomHtml() {
     ${scheduleTable(sch.rows)}
     <p class="note">Counted tile by tile from the layouts below: every full tile, plus one tile (or a big-enough offcut) for every cut piece. The
       extra allowance covers breakages, miscuts and a few spares for repairs — buy everything from the same batch.</p>
+    ${cuttingList(sch.rows)}
 
     ${walls.map((w) => wallSection(w, cfg, groups.get(w.i) || [])).join('')}
     ${groups.has('other') ? `<section class="tile-wall"><h4>Boxing not against a wall</h4>${surfList(groups.get('other'))}</section>` : ''}
@@ -192,6 +198,33 @@ function wallSection(w, cfg, surfs) {
   </section>`;
 }
 
+// Each tile that gets cut and the pieces that come out of it, in order — pieces for another surface highlighted, so
+// the offcut is kept for it rather than thrown away.
+function cuttingList(rows, open = false) {
+  return rows.filter((r) => r.count.sheets.length).map((r) => {
+    const t = r.tile, c = r.count, full = c.full ? `${c.full} laid whole, ` : '';
+    return `<details class="cutlist" ${open ? 'open' : ''}><summary><b>Cutting list — ${esc(tileLabel(t))}</b>: ${full}${c.fresh} cut
+      ${c.fromOffcut ? `· ${c.fromOffcut} piece${c.fromOffcut > 1 ? 's' : ''} from offcuts${r.moves ? `, <b>${r.moves} carried to another surface</b>` : ''}` : ''}</summary>
+      <ol class="sheets">${c.sheets.map((sh) => {
+        const from = sh.pieces[0].s;
+        return `<li><span class="muted">Tile ${sh.n}</span> ${sh.pieces.map((p, i) => `<span class="${i && p.s !== from ? 'mv' : ''}">${i ? '→ ' : ''}${esc(p.s.label)} <b>${mm(p.w)}×${mm(p.h)}</b></span>`).join(' ')}</li>`;
+      }).join('')}</ol>
+      <p class="note">Pieces are cut biggest first; the offcut keeps going (→) to the next piece it holds whole. <span class="mv">Highlighted</span>
+        pieces go to a different surface — keep those offcuts.</p></details>`;
+  }).join('');
+}
+
+// One line per surface about offcuts it takes or gives, and corners where it stops against other tiles.
+function offcutNotes(s) {
+  // "Window reveal 813×1090 — sill" and "— left" are one fitting
+  const cnt = (list, k, counts = true) => { const m = new Map(); for (const x of list || []) { const l = x[k].split(' — ')[0]; m.set(l, (m.get(l) || 0) + 1); } return [...m].map(([l, n]) => `${esc(l)}${counts && n > 1 ? ` ×${n}` : ''}`).join(', '); };
+  return [
+    s.offIn?.length ? `<div class="note off">⤷ ${s.offIn.length} piece${s.offIn.length > 1 ? 's' : ''} from offcuts of ${cnt(s.offIn, 'from', false)} (tile ${[...new Set(s.offIn.map((x) => x.n))].join(', ')})</div>` : '',
+    s.offOut?.length ? `<div class="note off">⤴ Keep offcuts for ${cnt(s.offOut, 'to')}</div>` : '',
+    s.butts?.length ? `<div class="note">Stops against the tiles on ${s.butts.map(esc).join(' and ')} (−${+store.project.tileOpts?.buildUp || 0} mm)</div>` : '',
+  ].join('');
+}
+
 function surfList(surfs) {
   if (!surfs.length) return '<p class="note">Nothing tiled here.</p>';
   // group niche / reveal parts under one override control
@@ -204,7 +237,7 @@ function surfList(surfs) {
     const stats = lay ? `${m2(lay.area)} m² · <b>${lay.pieces.filter((p) => p.full).length}</b> full + <b>${lay.pieces.filter((p) => !p.full).length}</b> cut${s.minCut != null ? ` · smallest cut ${mm(s.minCut)} mm${s.minCut < SMALL_CUT ? ' <span class="warn" title="A thin sliver: consider moving the zone edge, or the layout, so the cut is bigger">⚠</span>' : ''}` : ''}` : 'not tiled';
     return `<div class="surf ${t ? '' : 'off'}">
       ${t && lay ? drawSurface(s, t) : `<div class="surf-off">${mm(b.w)} × ${mm(b.h)}</div>`}
-      <div class="surf-info"><b>${esc(s.label)}</b><div class="note">${mm(b.w)} × ${mm(b.h)} mm${t ? ` · ${esc(tileLabel(t))}` : ''}</div><div class="note">${stats}</div>
+      <div class="surf-info"><b>${esc(s.label)}</b><div class="note">${mm(b.w)} × ${mm(b.h)} mm${t ? ` · ${esc(tileLabel(t))}` : ''}</div><div class="note">${stats}</div>${lay ? offcutNotes(s) : ''}
       ${ov ? `<select data-face="${esc(ov)}" title="Tile for this surface">${tileOpts(cfgFaces[ov] || '', [['', 'Automatic (as the wall)'], ['none', 'Not tiled']])}</select>` : ''}</div>
     </div>`;
   }).join('')}</div>`;
@@ -271,6 +304,7 @@ function wire(body) {
   const act = (name, fn, ev = 'click') => body.querySelectorAll(`[data-act="${name}"]`).forEach((el) => el.addEventListener(ev, () => fn(el)));
   act('addTile', () => editLib((p) => { p.tiles = p.tiles || []; p.tiles.push(newTile({ name: `Tile ${p.tiles.length + 1}` })); }));
   act('reuse', (el) => editLib((p) => { p.tileOpts = { ...(p.tileOpts || {}), reuse: el.checked }; }), 'change');
+  act('buildUp', (el) => editLib((p) => { p.tileOpts = { ...(p.tileOpts || {}), buildUp: Math.max(0, Math.min(40, +el.value || 0)) }; }), 'change');
   act('room', (el) => switchRoom(el.value), 'change');
   // room settings
   body.querySelectorAll('[data-cfg]').forEach((el) => el.addEventListener('change', () => editRoom((t, d) => {
@@ -347,9 +381,9 @@ function printSchedule() {
     const groups = new Map();
     for (const s of sch.surfaces) if (!s.empty && s.lay) { const g = groups.get(s.group) || []; g.push(s); groups.set(s.group, g); }
     const name = (g) => (g === 'floor' ? 'Floor' : g === 'other' ? 'Other boxing' : `Wall ${g + 1} · ${mm(walls[g].len)} mm`);
-    return `<section><h2>${esc(room.name)}</h2>${scheduleTable(sch.rows)}
+    return `<section><h2>${esc(room.name)}</h2>${scheduleTable(sch.rows)}${cuttingList(sch.rows, true)}
       ${[...groups].map(([g, list]) => `<h3>${name(g)}</h3><div class="surfs">${list.map((s) => { const t = tileById(store.project, s.tile), b = bounds(s.polys), c = s.lay.pieces.filter((p) => !p.full).length;
-        return `<div class="surf">${drawSurface(s, t, 200, 130)}<div><b>${esc(s.label)}</b><br>${mm(b.w)} × ${mm(b.h)} mm · ${esc(tileLabel(t))}<br>${m2(s.lay.area)} m² · ${s.lay.pieces.length - c} full + ${c} cut${s.minCut != null ? ` · smallest cut ${mm(s.minCut)} mm` : ''}</div></div>`; }).join('')}</div>`).join('')}</section>`;
+        return `<div class="surf">${drawSurface(s, t, 200, 130)}<div><b>${esc(s.label)}</b><br>${mm(b.w)} × ${mm(b.h)} mm · ${esc(tileLabel(t))}<br>${m2(s.lay.area)} m² · ${s.lay.pieces.length - c} full + ${c} cut${s.minCut != null ? ` · smallest cut ${mm(s.minCut)} mm` : ''}${offcutNotes(s)}</div></div>`; }).join('')}</div>`).join('')}</section>`;
   };
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>Tile schedule — ${esc(store.project.name)}</title><style>
     body{font:12px -apple-system,Segoe UI,sans-serif;color:#1d232b;margin:18px} h1{font-size:18px} h2{font-size:15px;margin:22px 0 6px;page-break-before:auto} h3{font-size:12.5px;margin:12px 0 4px}
@@ -357,6 +391,8 @@ function printSchedule() {
     .note{color:#6b7380;font-size:10.5px} .muted{color:#6b7380} .sw{display:inline-block;width:10px;height:10px;border:1px solid #999;margin-right:5px;vertical-align:-1px}
     .surfs{display:flex;flex-wrap:wrap;gap:10px} .surf{display:flex;gap:8px;align-items:flex-start;width:48%;break-inside:avoid;font-size:11px}
     .surf-svg .tf{fill:var(--tile);stroke:#555;stroke-width:.6} .surf-svg .tc{fill:#f3c27a;stroke:#555;stroke-width:.6} .surf-svg .hatch{stroke:#ccc;stroke-width:1} .surf-svg{border:1px solid #bbb;flex:none}
+    .cutlist summary{list-style:none;margin:8px 0 4px} .sheets{margin:0 0 4px;padding-left:0;list-style:none;columns:2;column-gap:24px;font-size:10.5px} .sheets li{break-inside:avoid;margin-bottom:2px}
+    .mv{background:#fde7c4;border-radius:3px;padding:0 2px} .off{color:#8a5a12}
     section{break-inside:auto} @media print{body{margin:8mm}}</style></head><body>
     <h1>Tile schedule — ${esc(store.project.name)}</h1>
     ${tab === 'room' ? '' : `<h2>Project total</h2>${scheduleTable(ps.totals, { project: true })}`}

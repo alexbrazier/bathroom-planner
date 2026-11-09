@@ -344,3 +344,9 @@ button.proj { background: none; border: 0; font: inherit; font-weight: 600; }
 .surf-svg .hatch { stroke: var(--line-hover); stroke-width: 1; }
 .warn { color: #c46a12; font-weight: 700; }
 @media (max-width: 640px) { .surf { width: 100%; } .zone .zr { min-width: 0; } }
+.cutlist { margin: 8px 0 4px; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+.cutlist summary { cursor: pointer; font-size: 12.5px; }
+.cutlist .sheets { margin: 8px 0 4px; padding: 0; list-style: none; columns: 2 320px; column-gap: 24px; font-size: 12px; }
+.cutlist .sheets li { break-inside: avoid; margin-bottom: 3px; }
+.cutlist .mv { background: color-mix(in srgb, #e8a23c 28%, transparent); border-radius: 3px; padding: 0 3px; }
+.surf .note.off { color: #b8792a; }

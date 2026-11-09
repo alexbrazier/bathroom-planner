@@ -198,7 +198,7 @@ export function surfacesOf(design, project) {
       const g = byTile.get(tile) || { polys: [], zones: [] };
       g.polys.push(...polys); g.zones.push(p.z); byTile.set(tile, g);
     }
-    for (const [tile, g] of byTile) out.push({ key: `${key}|${tile}`, ovKey: kind === 'wall' ? null : key, group, label, kind, plane: 'v', polys: g.polys, tile, len, zones: g.zones });
+    for (const [tile, g] of byTile) out.push({ key: `${key}|${tile}`, ovKey: kind === 'wall' ? null : key, group, label, kind, plane: 'v', polys: g.polys, tile, len, zones: g.zones, geo: { P0, e, n, len } });
     for (const nc of niches) {
       const z = host == null ? dflt : zoneAt(host, hostX(host, at(nc.s)));
       nicheParts(nc.key, nc.W, nc.H, nc.D, over(nc.key, z.top > nc.bottom ? z.tile : ''), nc.label, group);
@@ -296,9 +296,16 @@ const phases = (lo, hi, t, p) => { const c = (lo + hi) / 2; return [lo, hi - t, 
 // more pieces out of each tile. Slivers beside doors, windows and boxing are avoided as well as at the corners.
 // If no layout is good, the one whose thinnest cut is widest wins. Returns { area (mm²), pieces: [{ w, h, full }], cells: [{ x, y, full }], tw, th }.
 export function layTiles(polys, tile) {
+  const L = layOptions(polys, tile), best = L.opts[0];
+  return best ? { area: L.area, pieces: best.pieces, cells: best.cells, tw: L.tw, th: L.th, ok: best.ok } : { area: L.area, pieces: [], cells: [], tw: L.tw, th: L.th };
+}
+
+// As layTiles, but with every layout that is just as good on its own (same number of pieces, all cuts big enough)
+// and cuts different sizes — so the room can pick the ones whose offcuts fit pieces elsewhere. Best first.
+export function layOptions(polys, tile) {
   const { w: tw, h: th } = laidSize(tile), g = Math.max(0, +tile.joint || 0), shift = PATTERNS[tile.pattern]?.shift || 0;
   const area = polys.reduce((s, p) => s + areaOf(p), 0);
-  if (!polys.length || area < 1) return { area, pieces: [], cells: [], tw, th };
+  if (!polys.length || area < 1) return { area, tw, th, opts: [] };
   const b = polyBounds(polys.flat()), pu = tw + g, pv = th + g;
   const at = (fu, fv) => {
     const pieces = [], cells = [];
@@ -310,18 +317,33 @@ export function layTiles(polys, tile) {
       const sb = polyBounds(strip.flat());
       const fx = fu + (((j - j0) * shift) % 1) * pu;
       for (let x = fx + Math.floor((sb.x0 - fx) / pu) * pu; x < sb.x1; x += pu) {
-        let a = 0, x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        // the bits of the surface in this cell; touching bits are one piece (an L round a window corner), bits
+        // apart (either side of a door) are separate pieces
+        const frags = [];
         for (const p of strip) {
           const c = clipBox(p, x, y, x + tw, y + th);
           if (c.length < 3) continue;
           const ca = areaOf(c); if (ca < 0.01) continue;
-          a += ca;
-          for (const q of c) { x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x); y1 = Math.max(y1, q.y); }
+          const cb = polyBounds(c);
+          frags.push({ a: ca, x0: cb.x0, y0: cb.y0, x1: cb.x1, y1: cb.y1 });
         }
-        if (a < 1 || x1 - x0 < SLIVER || y1 - y0 < SLIVER) continue;
-        const full = a >= tw * th - (tw + th) * 0.5;
-        pieces.push(full ? { w: tw, h: th, full } : { w: x1 - x0, h: y1 - y0, full });
-        cells.push({ x, y, full });
+        for (let m = true; m;) {
+          m = false;
+          for (let i = 0; i < frags.length && !m; i++) for (let k = i + 1; k < frags.length; k++) {
+            const f = frags[i], o = frags[k];
+            if (f.x0 > o.x1 + 1 || o.x0 > f.x1 + 1 || f.y0 > o.y1 + 1 || o.y0 > f.y1 + 1) continue;
+            frags[i] = { a: f.a + o.a, x0: Math.min(f.x0, o.x0), y0: Math.min(f.y0, o.y0), x1: Math.max(f.x1, o.x1), y1: Math.max(f.y1, o.y1) };
+            frags.splice(k, 1); m = true; break;
+          }
+        }
+        let any = false, cellFull = false;
+        for (const f of frags) {
+          if (f.a < 1 || f.x1 - f.x0 < SLIVER || f.y1 - f.y0 < SLIVER) continue;
+          const full = f.a >= tw * th - (tw + th) * 0.5;
+          pieces.push(full ? { w: tw, h: th, full } : { w: f.x1 - f.x0, h: f.y1 - f.y0, full });
+          any = true; cellFull ||= full;
+        }
+        if (any) cells.push({ x, y, full: cellFull });
       }
     }
     // the thinnest cut, in mm and as a share of the tile
@@ -332,37 +354,93 @@ export function layTiles(polys, tile) {
     }
     return { pieces, cells, thin, ok, tiles: countTiles(pieces, tile).tiles };
   };
-  let best = null, order = 0;
-  for (const fv of phases(b.y0, b.y1, th, pv)) for (const fu of phases(b.x0, b.x1, tw, pu)) {
-    const L = at(fu, fv); L.order = order++;
-    if (!best) { best = L; continue; }
-    const better = L.ok !== best.ok ? L.ok
-      : L.ok ? L.pieces.length < best.pieces.length || (L.pieces.length === best.pieces.length && L.tiles < best.tiles)
-      : L.thin > best.thin + 0.5 || (Math.abs(L.thin - best.thin) <= 0.5 && L.tiles < best.tiles);
-    if (better) best = L;
+  // start points: the four standard ones, then (when those leave slivers) a joint lined up with each edge of the
+  // surface — the top of half-height tiling, a window sill or head, a box top, a door edge
+  const edges = (k, t, p) => {
+    const vs = [...new Set(polys.flat().map((q) => Math.round(q[k])))];
+    return vs.flatMap((v) => [v, v - t]).map((f) => ({ f, m: ((f % p) + p) % p }));
+  };
+  const uniq = (list, p) => { const seen = []; return list.filter(({ m }) => !seen.some((s) => Math.min(Math.abs(s - m), p - Math.abs(s - m)) < 1) && seen.push(m)); };
+  const all = [];
+  const run = (us, vs) => { for (const fv of vs) for (const fu of us) all.push(at(fu, fv)); };
+  const bu = phases(b.x0, b.x1, tw, pu), bv = phases(b.y0, b.y1, th, pv);
+  run(bu, bv);
+  if (!all.some((L) => L.ok)) {
+    const more = (base, k, t, p) => {
+      const b0 = base.map((f) => ({ f, m: ((f % p) + p) % p }));
+      return uniq([...b0, ...edges(k, t, p)], p).slice(uniq(b0, p).length).slice(0, 10).map((o) => o.f);
+    };
+    const eu = more(bu, 'x', tw, pu), ev = more(bv, 'y', th, pv);
+    run(eu, bv); run(bu, ev); run(eu, ev);
   }
-  return { area, pieces: best.pieces, cells: best.cells, tw, th, ok: best.ok };
+  const better = (L, best) => L.ok !== best.ok ? L.ok
+    : L.ok ? L.pieces.length < best.pieces.length || (L.pieces.length === best.pieces.length && L.tiles < best.tiles)
+    : L.thin > best.thin + 0.5 || (Math.abs(L.thin - best.thin) <= 0.5 && L.tiles < best.tiles);
+  let best = all[0];
+  for (const L of all) if (better(L, best)) best = L;
+  const opts = [best], seen = new Set([sig(best)]);
+  if (best.ok) for (const L of all) {
+    if (!L.ok || L.pieces.length !== best.pieces.length || seen.has(sig(L))) continue;
+    seen.add(sig(L)); opts.push(L);
+  }
+  return { area, tw, th, opts };
 }
+const sig = (L) => L.pieces.map((p) => (p.full ? 'F' : `${Math.round(p.w)}x${Math.round(p.h)}`)).sort().join(' ');
 
 // How many tiles the pieces take: a full tile each, and cut pieces from a fresh tile or (reuse) from an offcut
 // that holds the whole piece. Biggest pieces first; offcuts are cut guillotine-style, keeping the larger leftover.
+// `sheets` is the cutting list: each tile that gets cut, with the pieces taken from it in order (a piece keeps
+// whatever else it carried, e.g. the surface it's for).
 export function countTiles(pieces, tile, reuse = true) {
   const { w: tw, h: th } = laidSize(tile);
   const cuts = pieces.filter((p) => !p.full).sort((a, b) => b.w * b.h - a.w * a.h);
   const full = pieces.length - cuts.length;
-  const offcuts = [];
+  const offcuts = [], sheets = [];
   let fresh = 0, fromOffcut = 0;
   for (const p of cuts) {
     let bi = -1;
     if (reuse) offcuts.forEach((o, i) => { if (o.w >= p.w && o.h >= p.h && (bi < 0 || o.w * o.h < offcuts[bi].w * offcuts[bi].h)) bi = i; });
     let src;
-    if (bi >= 0) { src = offcuts.splice(bi, 1)[0]; fromOffcut++; } else { src = { w: tw, h: th }; fresh++; }
+    if (bi >= 0) { src = offcuts.splice(bi, 1)[0]; fromOffcut++; } else { src = { w: tw, h: th, sheet: sheets.length }; sheets.push({ pieces: [] }); fresh++; }
+    sheets[src.sheet].pieces.push(p);
     const rw = src.w - p.w - KERF, rh = src.h - p.h - KERF;
     const A = [{ w: rw, h: src.h }, { w: p.w, h: rh }], B = [{ w: src.w, h: rh }, { w: rw, h: p.h }];
     const big = (s) => Math.max(0, ...s.filter((o) => o.w > 0 && o.h > 0).map((o) => o.w * o.h));
-    for (const o of big(A) >= big(B) ? A : B) if (o.w >= MIN_OFFCUT && o.h >= MIN_OFFCUT) offcuts.push(o);
+    for (const o of big(A) >= big(B) ? A : B) if (o.w >= MIN_OFFCUT && o.h >= MIN_OFFCUT) offcuts.push({ ...o, sheet: src.sheet });
   }
-  return { full, cut: cuts.length, fresh, fromOffcut, tiles: full + fresh, noReuse: pieces.length };
+  return { full, cut: cuts.length, fresh, fromOffcut, tiles: full + fresh, noReuse: pieces.length, sheets };
+}
+
+// Internal corners between tiled faces (walls, boxing, built-out walls): where two meet, one runs into the corner and
+// the other stops against its tiles, so it loses the tile + adhesive thickness there. Returns
+// [{ sides: [{ s, x, dir, y0, y1 }, …] }] — s a surface, x the end of its tiling, dir +1 if the tiling runs right of x.
+function cornersOf(surfaces) {
+  const faces = surfaces.filter((s) => s.geo && s.plane === 'v');
+  const ends = [];
+  for (const s of faces) for (const p of s.polys) {
+    const b = polyBounds(p);
+    for (const [x, dir] of [[b.x0, 1], [b.x1, -1]]) {
+      const ys = p.filter((q) => Math.abs(q.x - x) < 1).map((q) => q.y);
+      if (ys.length < 2) continue;
+      const { P0, e } = s.geo;
+      ends.push({ s, x, dir, y0: Math.min(...ys), y1: Math.max(...ys), C: { x: P0.x + e.x * x, y: P0.y + e.y * x }, d: { x: e.x * dir, y: e.y * dir } });
+    }
+  }
+  const out = [], tol = 12;
+  for (let i = 0; i < ends.length; i++) for (let j = i + 1; j < ends.length; j++) {
+    const a = ends[i], b = ends[j];
+    if (a.s === b.s || Math.hypot(a.C.x - b.C.x, a.C.y - b.C.y) > tol * 1.5) continue;
+    // at right angles, each running away from the other's face into the room
+    const na = a.s.geo.n, nb = b.s.geo.n;
+    if (nb.x * a.d.x + nb.y * a.d.y < 0.95 || na.x * b.d.x + na.y * b.d.y < 0.95) continue;
+    const y0 = Math.max(a.y0, b.y0), y1 = Math.min(a.y1, b.y1);
+    if (y1 - y0 < 10) continue;
+    // one corner per pair of faces at one place, however many pieces each face is split into there
+    const same = out.find((c) => c.sides[0].s === a.s && c.sides[1].s === b.s && Math.abs(c.sides[0].x - a.x) < 1 && Math.abs(c.sides[1].x - b.x) < 1);
+    if (same) { for (const sd of same.sides) { sd.y0 = Math.min(sd.y0, y0); sd.y1 = Math.max(sd.y1, y1); } continue; }
+    out.push({ sides: [{ s: a.s, x: a.x, dir: a.dir, y0, y1 }, { s: b.s, x: b.x, dir: b.dir, y0, y1 }] });
+  }
+  return out;
 }
 
 // Order quantity: tiles needed plus the extra allowance, rounded up to whole boxes when the box size is known.
@@ -373,22 +451,80 @@ export function orderOf(tile, needed) {
   return { order: boxes ? boxes * per : order, boxes, m2: ((boxes ? boxes * per : order) * tile.w * tile.h) / 1e6 };
 }
 
-// Everything for one room: surfaces with their layouts, and one row per tile.
+// Everything for one room: surfaces with their layouts, and one row per tile. Each surface gets one of its equally
+// good layouts (fewest pieces, no thin cuts); which one — and, with a tile thickness set, which face runs into each
+// tiled corner — is chosen for the fewest tiles across the room, so one wall's offcuts are cut to fit pieces elsewhere.
 export function roomSchedule(design, project) {
-  const reuse = project?.tileOpts?.reuse ?? true;
+  const reuse = project?.tileOpts?.reuse ?? true, bu = Math.max(0, +project?.tileOpts?.buildUp || 0);
   const surfaces = surfacesOf(design, project);
+  const live = [];
+  for (const s of surfaces) { const t = tileById(project, s.tile); if (t) live.push({ s, t }); }
+  const corners = bu > 0 ? cornersOf(live.map((x) => x.s)) : [];
+  const cornersOn = new Map(); // surface → [{ k: corner, w: its side, sd }]
+  corners.forEach((c, k) => c.sides.forEach((sd, w) => { const l = cornersOn.get(sd.s) || []; l.push({ k, w, sd }); cornersOn.set(sd.s, l); }));
+  const choice = corners.map(() => 0); // the side that stops against the other's tiles
+  const pick = new Map(live.map((x) => [x.s, 0]));
+  const cache = new Map();
+  const butting = (s) => (cornersOn.get(s) || []).filter((o) => choice[o.k] === o.w);
+  const variant = (x) => {
+    const mine = butting(x.s), key = x.s.key + '#' + mine.map((o) => o.k).join(',');
+    let v = cache.get(key);
+    if (!v) {
+      let polys = x.s.polys;
+      for (const { sd } of mine) polys = subtract(polys, sd.dir > 0 ? rect(sd.x - 1, sd.y0, sd.x + bu, sd.y1) : rect(sd.x - bu, sd.y0, sd.x + 1, sd.y1)).filter(solid);
+      v = { polys, ...layOptions(polys, x.t) };
+      cache.set(key, v);
+    }
+    return v;
+  };
+  const layOf = (x) => { const v = variant(x); return v.opts[Math.min(pick.get(x.s), v.opts.length - 1)]; };
+  const cost = () => { // fewest pieces, then fewest tiles
+    const by = new Map(); let n = 0;
+    for (const x of live) { const L = layOf(x); if (!L) continue; n += L.pieces.length; const a = by.get(x.t) || []; a.push(...L.pieces); by.set(x.t, a); }
+    let tiles = 0; for (const [t, ps] of by) tiles += countTiles(ps, t, reuse).tiles;
+    return n * 1e5 + tiles;
+  };
+  if (live.length) {
+    let best = cost();
+    for (let pass = 0; pass < 4; pass++) {
+      let improved = false;
+      for (let k = 0; k < corners.length; k++) { choice[k] ^= 1; const c = cost(); if (c < best) { best = c; improved = true; } else choice[k] ^= 1; }
+      for (const x of live) {
+        const n = variant(x).opts.length; if (n < 2) continue;
+        let bi = Math.min(pick.get(x.s), n - 1);
+        for (let i = 0; i < n; i++) { if (i === bi) continue; pick.set(x.s, i); const c = cost(); if (c < best) { best = c; bi = i; improved = true; } }
+        pick.set(x.s, bi);
+      }
+      if (!improved) break;
+    }
+  }
   const rows = new Map();
-  for (const s of surfaces) {
-    const t = tileById(project, s.tile);
-    if (!t) continue;
-    s.lay = layTiles(s.polys, t);
+  for (const x of live) {
+    const s = x.s, t = x.t, v = variant(x), L = layOf(x);
+    s.polys = v.polys;
+    s.butts = [...new Set(butting(s).map((o) => corners[o.k].sides[1 - o.w].s.label))];
+    s.lay = { area: v.area, tw: v.tw, th: v.th, pieces: L ? L.pieces.map((p) => ({ ...p, s })) : [], cells: L ? L.cells : [], ok: L?.ok };
     if (!s.lay.pieces.length) { s.empty = true; continue; } // only slivers under the grout line
     const cuts = s.lay.pieces.filter((p) => !p.full);
     s.minCut = cuts.length ? Math.min(...cuts.map((p) => Math.min(p.w, p.h))) : null;
     const r = rows.get(t.id) || { tile: t, area: 0, pieces: [], surfaces: [] };
     r.area += s.lay.area; r.pieces.push(...s.lay.pieces); r.surfaces.push(s); rows.set(t.id, r);
   }
-  for (const r of rows.values()) { r.count = countTiles(r.pieces, r.tile, reuse); Object.assign(r, orderOf(r.tile, r.count.tiles)); }
+  for (const r of rows.values()) {
+    r.count = countTiles(r.pieces, r.tile, reuse); Object.assign(r, orderOf(r.tile, r.count.tiles));
+    // offcuts that go from one surface to another
+    r.moves = 0;
+    r.count.sheets.forEach((sh, n) => {
+      sh.n = n + 1;
+      const from = sh.pieces[0].s;
+      for (const p of sh.pieces.slice(1)) {
+        if (p.s === from) continue;
+        r.moves++;
+        (p.s.offIn ||= []).push({ from: from.label, w: p.w, h: p.h, n: sh.n });
+        (from.offOut ||= []).push({ to: p.s.label, w: p.w, h: p.h, n: sh.n });
+      }
+    });
+  }
   return { surfaces, rows: [...rows.values()] };
 }
 

@@ -31,7 +31,10 @@ extra %, tiles per box). **This room**: the wall and floor tile, how high the wa
 (full height in the shower, a feature tile on one wall, …) — **Full height around shower & bath** sets those up from the
 tray/bath positions. Every surface (wall stretches, boxing faces and tops, niches, window reveals, floor, wet-room
 floor) is laid out tile by tile in `js/tiling.js`, avoiding thin cuts where it can; each cut piece takes a fresh tile
-or an offcut that holds the whole piece. The schedule shows full tiles, cut pieces, tiles needed, the extra allowance
+or an offcut that holds the whole piece. Each surface keeps its fewest-pieces layouts; between those the room picks
+the ones whose offcuts fit pieces elsewhere. Each room's **cutting list** shows every cut tile and the pieces taken
+from it, highlighting offcuts carried to another surface. An optional tile + adhesive thickness shortens a face where
+it stops against tiles in a corner. The schedule shows full tiles, cut pieces, tiles needed, the extra allowance
 and the order (rounded to boxes), per room and for the project, with a drawing of every surface (print / CSV).
 
 ## Sharing
