@@ -3,6 +3,7 @@
 // dimensions you need for windows, doors and fitting heights.
 import { sizeOf, modelOf, coloursOf } from './state.js';
 import { wallsOf, itemCorners, ceilingAt } from './geom.js';
+import { zonesOf } from './tiling.js';
 
 const NEAR = 450;      // fittings whose nearest edge is within this distance of the wall (mm) are drawn on it
 const MARGIN = { l: 380, r: 420, t: 420, b: 380 }; // room for dimensions around the wall (mm, real)
@@ -45,7 +46,11 @@ export function elevationOf(design, i) {
   const surface = (f) => (['falsewall', 'box'].includes(f.m.kind) ? 0 : 1);
   items.sort((a, b) => surface(a) - surface(b) || b.dist - a.dist);
   const H = Math.max(...top.map((p) => p.y));
-  return { i, w, len: w.len, H, top, ops, items, tile: room.wallTile?.enabled ? room.wallTile.height : 0 };
+  // tiled stretches (per-wall zones from the Tiles dialog, else the room's tile height), left to right
+  const wt = room.wallTile || {};
+  const height = !wt.enabled ? 0 : wt.height >= room.height ? Infinity : wt.height;
+  const tiles = zonesOf({ height, walls: design.tiling?.walls || {}, wall: '' }, i, w.len).filter((z) => z.top > 0).map((z) => ({ x0: z.x0, x1: z.x1, top: Math.min(z.top, H) }));
+  return { i, w, len: w.len, H, top, ops, items, tiles };
 }
 
 // Size of the drawing in real mm, including the dimension margins.
@@ -64,17 +69,20 @@ export function drawElevation(ctx, el, kPx, paperPx = 4) {
   for (const p of el.top) ctx.lineTo(X(p.x), Y(p.y));
   ctx.lineTo(X(el.len), Y(0)); ctx.closePath();
   ctx.fillStyle = '#f6f4ef'; ctx.fill();
-  if (el.tile) {
+  if (el.tiles.length) {
     ctx.save(); ctx.clip();
-    ctx.fillStyle = 'rgba(160,170,180,0.12)'; ctx.fillRect(X(0), Y(el.tile), X(el.len) - X(0), Y(0) - Y(el.tile));
+    ctx.fillStyle = 'rgba(160,170,180,0.12)';
+    for (const z of el.tiles) ctx.fillRect(X(z.x0), Y(z.top), X(z.x1) - X(z.x0), Y(0) - Y(z.top));
     ctx.restore();
   }
   ctx.strokeStyle = '#3b4048'; ctx.lineWidth = lw(0.5); ctx.stroke();
   // floor line
   ctx.beginPath(); ctx.moveTo(X(-150), Y(0)); ctx.lineTo(X(el.len + 150), Y(0)); ctx.lineWidth = lw(0.6); ctx.stroke();
-  if (el.tile) {
+  if (el.tiles.length) {
     ctx.save(); ctx.setLineDash([lw(1.2), lw(0.8)]); ctx.strokeStyle = 'rgba(90,100,110,0.6)'; ctx.lineWidth = lw(0.2);
-    ctx.beginPath(); ctx.moveTo(X(0), Y(el.tile)); ctx.lineTo(X(el.len), Y(el.tile)); ctx.stroke(); ctx.restore();
+    ctx.beginPath();
+    for (const z of el.tiles) if (z.top < el.H) { ctx.moveTo(X(z.x0), Y(z.top)); ctx.lineTo(X(z.x1), Y(z.top)); }
+    ctx.stroke(); ctx.restore();
   }
   // openings
   for (const op of el.ops) {

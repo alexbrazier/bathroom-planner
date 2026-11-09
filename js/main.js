@@ -14,6 +14,7 @@ import { noteView } from './notes.js';
 import { initLibrary, renderLibrary, renderProps, showBOM, rotateItem, deleteItem, duplicateItem, copyItem, pasteClip, hasClip, toast } from './ui.js';
 import { ridersOf, applyRiders } from './place.js';
 import { initOverlays } from './overlays.js';
+import { initTiles, openTiles } from './tilesui.js';
 import { TEMPLATES } from './templates.js';
 
 const $ = (s) => document.querySelector(s);
@@ -98,7 +99,7 @@ async function main() {
     const room = activeRoom();
     const rooms = whole ? store.project.rooms : [room];
     shareCtx = {
-      p: whole ? store.project : { version: 2, name: store.project.name, rooms: [room], active: room.id },
+      p: whole ? store.project : { version: 2, name: store.project.name, rooms: [room], active: room.id, tiles: store.project.tiles, tileOpts: store.project.tileOpts },
       kind: whole ? 'project' : 'room', target: whole ? store.project.id : room.id,
       projectId: store.project.id, projectRoomIds: store.project.rooms.map((r) => r.id),
       roomIds: rooms.map((r) => r.id),
@@ -300,6 +301,8 @@ async function main() {
   $('#undoBtn').onclick = undo;
   $('#redoBtn').onclick = redo;
   $('#bomBtn').onclick = showBOM;
+  initTiles();
+  $('#tilesBtn').onclick = () => openTiles();
   $('#bom').addEventListener('click', (e) => { if (e.target.matches('[data-close]') || e.target === $('#bom')) $('#bom').hidden = true; });
   $('#cutaway').onchange = (e) => setCutaway(e.target.checked);
   $('#showCeiling').onchange = (e) => setCeiling(e.target.checked);
@@ -447,7 +450,7 @@ async function main() {
 
   // keyboard
   window.addEventListener('keydown', (e) => {
-    if (e.target.closest('input, select, textarea')) return;
+    if (e.target.closest('input, select, textarea') || !$('#tileDlg').hidden) return;
     if (store.readOnly && !['Escape', 'f', 'F', 'v', 'V', 'm', 'M', 'e', 'E'].includes(e.key) && e.code !== 'Space') return;
     if (e.code === 'Space') { plan.spaceDown = true; }
     if (drawKey(e)) { e.preventDefault(); return; }

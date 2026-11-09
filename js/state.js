@@ -192,6 +192,7 @@ export function moveRoom(roomId, targetId, { copy = false, newName } = {}) {
   const names = new Set(target.rooms.map((r) => r.name)); let n = 2;
   while (names.has(moved.name)) moved.name = `${room.name} (${n++})`;
   target.rooms.push(moved);
+  addTilesFrom(src, target);
   if (!target.active) target.active = moved.id;
   writeProject(target);
   if (!copy) {
@@ -201,6 +202,12 @@ export function moveRoom(roomId, targetId, { copy = false, newName } = {}) {
     commit('load');
   }
   return target.id;
+}
+// Rooms point at tiles in their project's library (tiling.js): bring any the target doesn't have yet.
+function addTilesFrom(src, target) {
+  const have = new Set((target.tiles || []).map((t) => t.id));
+  const add = (src.tiles || []).filter((t) => !have.has(t.id));
+  if (add.length) target.tiles = [...(target.tiles || []), ...JSON.parse(JSON.stringify(add))];
 }
 // Show someone else's project from a share link without touching the saved one.
 export function viewShared(p) { useProject(p); store.readOnly = true; emit('load'); }
@@ -221,6 +228,7 @@ export function leaveShared(copyRooms = false) {
     return store.project.rooms.map((r) => r.id);
   } else if (copyRooms) {
     const names = new Set(store.project.rooms.map((r) => r.name));
+    addTilesFrom(shared, store.project);
     for (const r of shared.rooms) {
       let name = r.name; let n = 2;
       while (names.has(name)) name = `${r.name} (${n++})`;

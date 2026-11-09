@@ -24,6 +24,16 @@ browser's localStorage: an index under `bathroom-designer:projects` and each pro
 (older single-project saves are migrated automatically). **File → Save/Open** exports and imports a project as
 `.json`; opening adds it as a new project.
 
+## Tiles
+
+**Tiles** (header) works out what to order. **Tile library**: the project's tiles (name, brand, size, joint, pattern,
+extra %, tiles per box). **This room**: the wall and floor tile, how high the walls are tiled, and per-wall stretches
+(full height in the shower, a feature tile on one wall, …) — **Full height around shower & bath** sets those up from the
+tray/bath positions. Every surface (wall stretches, boxing faces and tops, niches, window reveals, floor, wet-room
+floor) is laid out tile by tile in `js/tiling.js`, avoiding thin cuts where it can; each cut piece takes a fresh tile
+or an offcut that holds the whole piece. The schedule shows full tiles, cut pieces, tiles needed, the extra allowance
+and the order (rounded to boxes), per room and for the project, with a drawing of every surface (print / CSV).
+
 ## Sharing
 
 **Share ▾** creates a link to the current room or the whole project. The design is compressed into a token

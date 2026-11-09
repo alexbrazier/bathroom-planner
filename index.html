@@ -55,6 +55,7 @@
     </div>
   </div>
   <button id="bomBtn">Parts list</button>
+  <button id="tilesBtn" title="Tile quantities: wall and floor areas, per-wall tiling heights and a tile schedule to order from">Tiles</button>
   <button id="themeBtn" title="Theme: Auto (follows your system)">◐</button>
   <div class="menu">
     <button id="fileBtn">File ▾</button>
@@ -196,6 +197,14 @@
   <div class="modal-card">
     <div class="modal-head"><h2>Parts list</h2><button class="x" data-close>×</button></div>
     <div id="bomBody"></div>
+  </div>
+</div>
+
+<div id="tileDlg" class="modal" hidden>
+  <div class="modal-card tile-card">
+    <div class="modal-head"><h2>Tiles</h2><button class="x" data-close>×</button></div>
+    <div id="tileTabs" class="elev-tabs"></div>
+    <div id="tileBody"></div>
   </div>
 </div>
 
